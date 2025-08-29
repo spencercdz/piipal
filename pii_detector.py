@@ -1,508 +1,540 @@
-"""
-Clean PII detection pipeline using YOLOv11e (YOLOE):
-- Uses YOLOE's open-vocabulary detection with text prompts for PII classes
-- Direct detection and segmentation without complex dependencies
-- Adaptive Gaussian blur for detected sensitive content
-- Support for both images and videos
+import time
 
-Requirements:
-- pip install ultralytics opencv-python numpy
-- YOLOv11e model will be automatically downloaded on first use
-"""
-
-from ultralytics import YOLOE
+from typing import List, Tuple
 import cv2
 import numpy as np
-import json
-import os
-from pathlib import Path
-from typing import Tuple, Dict, Any, List
+from ultralytics import YOLOE
 
-# -----------------------------
-# Sensitive PII classes for YOLOE text prompts
-# -----------------------------
-SENSITIVE_CLASSES = [
-    # Identity documents and cards
-    "passport", "driver license", "id card", "credit card", "debit card",
-    "bank card", "identity card", "national id", "social security card",
+# Optional: SAHI for slice-based inference
+try:
+    from sahi.predict import get_sliced_prediction
+    from sahi.auto_model import AutoDetectionModel
+    SAHI_AVAILABLE = True
+except Exception:
+    SAHI_AVAILABLE = False
 
-    # Personal information displays
-    "phone number", "email address", "address", "signature",
-    "license plate", "vehicle plate", "barcode", "qr code",
 
-    # Financial information
-    "bank statement", "receipt", "invoice", "check", "financial document",
-
-    # Medical documents
-    "medical record", "prescription", "health card", "medical document",
-
-    # Biometric and personal
-    "fingerprint", "face", "person", "child", "minor",
-
-    # Documents with potential PII
-    "document", "contract", "letter", "form", "certificate",
-
-    # Digital displays showing sensitive info
-    "screen", "monitor", "tablet", "phone screen", "computer screen",
-    "pin entry", "password field", "login screen",
+# -------------------- Configuration --------------------
+SENSITIVE_CLASSES: List[str] = [
+    "license plate",
+    "identity card",
+    "credit card",
+    "bank card",
+    "card",
+    "watermark overlay stamp",
+    "wedding invitation",
 ]
 
-# Confidence thresholds for different sensitivity levels
-CONFIDENCE_THRESHOLDS = {
-    "high_sensitivity": {
-        "passport": 0.3,
-        "driver license": 0.3,
-        "credit card": 0.3,
-        "social security card": 0.3,
-        "face": 0.4,
-        "person": 0.5,
-        "default": 0.3
-    },
-    "medium_sensitivity": {
-        "default": 0.5
-    },
-    "low_sensitivity": {
-        "default": 0.7
+# Blur strength configuration (kernel must be odd numbers)
+BLUR_KERNEL: Tuple[int, int] = (25, 25)
+BLUR_SIGMA_X: int = 0
+
+# Model weights and device
+MODEL_WEIGHTS: str = "yoloe-11l-seg-pf.pt"
+DEVICE: str = "mps"  # set to "cpu" if MPS/CUDA unavailable
+
+# Inference tuning for small objects - PRIORITIZING ACCURACY
+CONF_THRESHOLD: float = 0.05  # Very low threshold to catch all potential objects
+IMG_SIZE: int = 2560          # Large inference size for small object detail
+UPSAMPLE_SCALE: float = 2.0   # 2x upsampling for better small object detection
+IOU_THRESHOLD: float = 0.3    # Lower IOU to allow overlapping detections (better recall)
+TTA: bool = True             # Enable test-time augmentation for better accuracy
+
+# SAHI configuration - OPTIMIZED FOR SMALL OBJECTS
+USE_SAHI: bool = True
+USE_SAHI_SEG: bool = True
+SAHI_SLICE_HEIGHT: int = 384  # Smaller slices for small objects
+SAHI_SLICE_WIDTH: int = 384   # Smaller slices for small objects
+SAHI_OVERLAP_RATIO: float = 0.4  # High overlap to catch objects at slice boundaries
+
+# I/O configuration (built-in, no CLI)
+INPUT_PATH: str = "car_vid.mp4"  # can be image or video
+OUTPUT_PATH: str = "car_vid_blurred.mp4"
+
+
+def load_model(weights: str) -> YOLOE:
+    model = YOLOE(weights)
+    # Disable runs folder saving
+    model.verbose = False
+    return model
+
+
+def read_image(path: str) -> np.ndarray:
+    img = cv2.imread(path, cv2.IMREAD_COLOR)
+    if img is None:
+        raise FileNotFoundError(f"Could not read image at '{path}'")
+    return img
+
+
+def is_video(path: str) -> bool:
+    video_exts = {
+        ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg",
     }
-}
+    lower = path.lower()
+    return any(lower.endswith(ext) for ext in video_exts)
 
-# -----------------------------
-# Utility: adaptive gaussian blur
-# -----------------------------
-def adaptive_blur(roi: np.ndarray, blur_strength: str = "medium") -> np.ndarray:
+
+def clamp_bbox(xyxy: Tuple[int, int, int, int], width: int, height: int) -> Tuple[int, int, int, int]:
+    x1, y1, x2, y2 = xyxy
+    x1 = max(0, min(int(x1), width - 1))
+    y1 = max(0, min(int(y1), height - 1))
+    x2 = max(0, min(int(x2), width - 1))
+    y2 = max(0, min(int(y2), height - 1))
+    if x2 < x1:
+        x1, x2 = x2, x1
+    if y2 < y1:
+        y1, y2 = y2, y1
+    return x1, y1, x2, y2
+
+
+def extract_sensitive_boxes(result, target_names: List[str]) -> List[Tuple[int, int, int, int]]:
+    boxes_xyxy: List[Tuple[int, int, int, int]] = []
+    if not hasattr(result, "boxes") or result.boxes is None:
+        return boxes_xyxy
+
+    names_map = result.names if hasattr(result, "names") else {}
+    for box in result.boxes:
+        cls_idx = int(box.cls.item()) if hasattr(box, "cls") else None
+        if cls_idx is None:
+            continue
+        cls_name = names_map.get(cls_idx, None)
+        if cls_name is None or cls_name not in target_names:
+            continue
+
+        xyxy = box.xyxy[0].tolist()  # [x1, y1, x2, y2]
+        x1, y1, x2, y2 = int(xyxy[0]), int(xyxy[1]), int(xyxy[2]), int(xyxy[3])
+        boxes_xyxy.append((x1, y1, x2, y2))
+
+    return boxes_xyxy
+
+
+def apply_blur_to_regions(image: np.ndarray, boxes: List[Tuple[int, int, int, int]]) -> np.ndarray:
+    if not boxes:
+        return image
+
+    h, w = image.shape[:2]
+    output = image.copy()
+
+    for (x1, y1, x2, y2) in boxes:
+        x1, y1, x2, y2 = clamp_bbox((x1, y1, x2, y2), w, h)
+        region = output[y1:y2, x1:x2]
+        if region.size == 0:
+            continue
+        blurred = cv2.GaussianBlur(region, ksize=BLUR_KERNEL, sigmaX=BLUR_SIGMA_X)
+        output[y1:y2, x1:x2] = blurred
+
+    return output
+
+
+def apply_blur_to_masks(image: np.ndarray, result, target_names: List[str]) -> np.ndarray:
+    """Apply Gaussian blur using instance segmentation masks for target classes.
+
+    Falls back to returning the original image if no usable masks are present.
     """
-    Apply Gaussian blur with kernel size proportional to ROI size.
+    if not hasattr(result, "masks") or result.masks is None or not hasattr(result.masks, "data"):
+        return image
+    if not hasattr(result, "boxes") or result.boxes is None:
+        return image
 
-    Args:
-        roi: Region of interest to blur
-        blur_strength: "light", "medium", or "heavy"
-    """
-    h, w = roi.shape[:2]
+    names_map = result.names if hasattr(result, "names") else {}
+    masks = result.masks.data  # [N, H, W] tensor
+    boxes = result.boxes
 
-    # Adjust blur intensity based on strength setting
-    strength_multipliers = {"light": 0.04, "medium": 0.06, "heavy": 0.08}
-    multiplier = strength_multipliers.get(blur_strength, 0.06)
+    h, w = image.shape[:2]
+    fully_blurred = cv2.GaussianBlur(image, ksize=BLUR_KERNEL, sigmaX=BLUR_SIGMA_X)
+    output = image.copy()
 
-    # Make kernel proportional to ROI size
-    k = int(max(3, round(multiplier * max(h, w))))
-    if k % 2 == 0:
-        k += 1
+    num_instances = masks.shape[0]
+    for i in range(num_instances):
+        cls_idx = int(boxes.cls[i].item()) if hasattr(boxes, "cls") else None
+        if cls_idx is None:
+            continue
+        cls_name = names_map.get(cls_idx, None)
+        if cls_name is None or cls_name not in target_names:
+            continue
 
-    # Ensure kernel isn't larger than the ROI
-    k = min(k, min(h, w) if min(h, w) > 2 else 3)
+        mask = masks[i].detach().cpu().numpy()
+        mask = (mask >= 0.5).astype(np.uint8)
+        if mask.sum() == 0:
+            continue
+        if mask.shape[0] != h or mask.shape[1] != w:
+            mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
 
-    sigma = 0  # Let OpenCV compute sigma from kernel size
-    return cv2.GaussianBlur(roi, (k, k), sigma)
+        mask_3c = np.repeat(mask[:, :, None], 3, axis=2)
+        output = np.where(mask_3c == 1, fully_blurred, output)
 
-# -----------------------------
-# Main PII Detection Pipeline
-# -----------------------------
-class YOLOEPIIDetector:
-    def __init__(self,
-                 model_name: str = "yoloe-11l-seg.pt",
-                 sensitivity_level: str = "high_sensitivity",
-                 blur_strength: str = "medium"):
-        """
-        Initialize YOLOE PII detector.
+    return output
 
-        Args:
-            model_name: YOLOE model variant (yoloe-11s/m/l-seg.pt)
-            sensitivity_level: Confidence threshold profile
-            blur_strength: Blur intensity for detected PII
-        """
-        self.model = YOLOE(model_name)
-        self.sensitivity_level = sensitivity_level
-        self.blur_strength = blur_strength
-        self.confidence_thresholds = CONFIDENCE_THRESHOLDS[sensitivity_level]
 
-        # Set up YOLOE with PII classes using the working approach
-        self._setup_pii_classes()
+def process_image(input_path: str, output_path: str) -> str:
+    image = read_image(input_path)
+    original_h, original_w = image.shape[:2]
+    work_img = image
+    if UPSAMPLE_SCALE and UPSAMPLE_SCALE > 1.0:
+        work_img = cv2.resize(
+            image,
+            (int(original_w * UPSAMPLE_SCALE), int(original_h * UPSAMPLE_SCALE)),
+            interpolation=cv2.IMREAD_COLOR,
+        )
 
-        print(f"✅ Initialized YOLOE PII detector with {len(SENSITIVE_CLASSES)} sensitive classes")
+    if USE_SAHI or USE_SAHI_SEG:
+        if not SAHI_AVAILABLE:
+            raise ImportError("SAHI not installed. Install with: pip install sahi")
 
-    def _setup_pii_classes(self):
-        """Configure YOLOE to detect PII classes using text prompts."""
-        try:
-            # Use the working approach from the reference
-            names = SENSITIVE_CLASSES
-            
-            # Set classes with text embeddings (this is the working pattern)
-            text_embeddings = self.model.get_text_pe(names)
-            self.model.set_classes(names, text_embeddings)
-            
-            print("✅ YOLOE configured for PII detection classes using text prompts")
-            print(f"   Configured {len(names)} sensitive classes")
-            
-        except Exception as e:
-            print(f"❌ Error configuring text embeddings: {e}")
-            print("⚠️  Using basic YOLOE detection (no text prompts)")
-            print("   The model will still detect objects but may not be optimized for PII")
+        sahi_model = AutoDetectionModel.from_pretrained(
+            model_path=MODEL_WEIGHTS,
+            model_type="ultralytics",
+            confidence_threshold=CONF_THRESHOLD,
+        )
 
-    def _get_confidence_threshold(self, class_name: str) -> float:
-        """Get confidence threshold for specific class."""
-        return self.confidence_thresholds.get(class_name.lower(),
-                                            self.confidence_thresholds["default"])
+        pred = get_sliced_prediction(
+            work_img,
+            sahi_model,
+            slice_height=SAHI_SLICE_HEIGHT,
+            slice_width=SAHI_SLICE_WIDTH,
+            overlap_height_ratio=SAHI_OVERLAP_RATIO,
+            overlap_width_ratio=SAHI_OVERLAP_RATIO,
+            verbose=0,
+        )
 
-    def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-        """
-        Process a single frame to detect and blur PII.
+        boxes: List[Tuple[int, int, int, int]] = []
+        detected_objects = []
+        for op in pred.object_prediction_list:
+            cls_name = getattr(getattr(op, "category", None), "name", None)
+            if not cls_name or cls_name not in SENSITIVE_CLASSES:
+                continue
+            x1, y1, x2, y2 = int(op.bbox.minx), int(op.bbox.miny), int(op.bbox.maxx), int(op.bbox.maxy)
+            confidence = getattr(op, "score", 0.0)
+            boxes.append((x1, y1, x2, y2))
+            detected_objects.append((cls_name, confidence))
 
-        Args:
-            frame: Input frame as BGR numpy array
+        print(f"SAHI found {len(boxes)} sensitive objects:")
+        for obj_name, conf in detected_objects:
+            print(f"  - {obj_name}: {conf:.3f}")
 
-        Returns:
-            Tuple of (processed_frame, detection_info_list)
-        """
-        # Run YOLOE prediction
-        results = self.model.predict(frame, verbose=False)
-
-        if not results or not results[0].boxes:
-            return frame, []
-
-        detection_info = []
+        if USE_SAHI_SEG:
+            seg_model = load_model(MODEL_WEIGHTS)
+            processed = work_img.copy()
+            for (x1, y1, x2, y2) in boxes:
+                x1, y1, x2, y2 = clamp_bbox((x1, y1, x2, y2), work_img.shape[1], work_img.shape[0])
+                roi = processed[y1:y2, x1:x2]
+                if roi.size == 0:
+                    continue
+                roi_results = seg_model.predict(
+                    roi,
+                    device=DEVICE,
+                    verbose=False,
+                    conf=CONF_THRESHOLD,
+                    imgsz=IMG_SIZE,
+                    iou=IOU_THRESHOLD,
+                    augment=TTA,
+                )
+                roi_result = roi_results[0]
+                if hasattr(roi_result, "masks") and roi_result.masks is not None and hasattr(roi_result.masks, "data"):
+                    fully_blurred_roi = cv2.GaussianBlur(roi, ksize=BLUR_KERNEL, sigmaX=BLUR_SIGMA_X)
+                    names_map = roi_result.names if hasattr(roi_result, "names") else {}
+                    masks = roi_result.masks.data
+                    boxes_roi = roi_result.boxes
+                    num_instances = masks.shape[0]
+                    for i in range(num_instances):
+                        cls_idx = int(boxes_roi.cls[i].item()) if hasattr(boxes_roi, "cls") else None
+                        if cls_idx is None:
+                            continue
+                        cls_name = names_map.get(cls_idx, None)
+                        if cls_name is None or cls_name not in SENSITIVE_CLASSES:
+                            continue
+                        mask = masks[i].detach().cpu().numpy()
+                        mask = (mask >= 0.5).astype(np.uint8)
+                        if mask.shape[:2] != roi.shape[:2]:
+                            mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
+                        mask_3c = np.repeat(mask[:, :, None], 3, axis=2)
+                        roi = np.where(mask_3c == 1, fully_blurred_roi, roi)
+                    processed[y1:y2, x1:x2] = roi
+                else:
+                    blurred = cv2.GaussianBlur(roi, ksize=BLUR_KERNEL, sigmaX=BLUR_SIGMA_X)
+                    processed[y1:y2, x1:x2] = blurred
+        else:
+            processed = apply_blur_to_regions(work_img, boxes)
+    else:
+        model = load_model(MODEL_WEIGHTS)
+        results = model.predict(work_img, device=DEVICE, conf=CONF_THRESHOLD, imgsz=IMG_SIZE, iou=IOU_THRESHOLD, augment=TTA)
         result = results[0]
+        boxes = []
+        detected_objects = []
+        if hasattr(result, "masks") and result.masks is not None and hasattr(result.masks, "data"):
+            processed = apply_blur_to_masks(work_img, result, SENSITIVE_CLASSES)
+            # Extract object info from masks
+            if hasattr(result, "boxes") and result.boxes is not None:
+                names_map = result.names if hasattr(result, "names") else {}
+                for i, box in enumerate(result.boxes):
+                    cls_idx = int(box.cls.item()) if hasattr(box, "cls") else None
+                    if cls_idx is None:
+                        continue
+                    cls_name = names_map.get(cls_idx, None)
+                    if cls_name is None or cls_name not in SENSITIVE_CLASSES:
+                        continue
+                    confidence = float(box.conf.item()) if hasattr(box, "conf") else 0.0
+                    detected_objects.append((cls_name, confidence))
+        else:
+            boxes = extract_sensitive_boxes(result, SENSITIVE_CLASSES)
+            processed = apply_blur_to_regions(work_img, boxes)
+            # Extract object info from boxes
+            if hasattr(result, "boxes") and result.boxes is not None:
+                names_map = result.names if hasattr(result, "names") else {}
+                for box in result.boxes:
+                    cls_idx = int(box.cls.item()) if hasattr(box, "cls") else None
+                    if cls_idx is None:
+                        continue
+                    cls_name = names_map.get(cls_idx, None)
+                    if cls_name is None or cls_name not in SENSITIVE_CLASSES:
+                        continue
+                    confidence = float(box.conf.item()) if hasattr(box, "conf") else 0.0
+                    detected_objects.append((cls_name, confidence))
 
-        # Process each detection
-        boxes = result.boxes
-        names = result.names if hasattr(result, 'names') else {}
+        print(f"Found {len(detected_objects)} sensitive objects:")
+        for obj_name, conf in detected_objects:
+            print(f"  - {obj_name}: {conf:.3f}")
 
-        for i in range(len(boxes)):
-            # Get detection data
-            xyxy = boxes.xyxy[i].cpu().numpy()
-            conf = float(boxes.conf[i].cpu().numpy())
-            cls_idx = int(boxes.cls[i].cpu().numpy())
+    # Downscale back to original size if we upsampled
+    if processed.shape[:2] != (original_h, original_w):
+        processed = cv2.resize(processed, (original_w, original_h), interpolation=cv2.INTER_AREA)
 
-            # Get class name from our configured classes
-            if cls_idx < len(SENSITIVE_CLASSES):
-                class_name = SENSITIVE_CLASSES[cls_idx]
-            else:
-                # Fallback to generic detection
-                class_name = names.get(cls_idx, f"class_{cls_idx}")
+    ok = cv2.imwrite(output_path, processed)
+    if not ok:
+        raise RuntimeError(f"Failed to write output image to '{output_path}'")
+    return output_path
 
-            # Check confidence threshold for this specific class
-            threshold = self._get_confidence_threshold(class_name)
-            if conf < threshold:
-                continue
 
-            # Extract and validate bounding box coordinates
-            x1, y1, x2, y2 = map(int, xyxy)
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
+def process_video(input_path: str, output_path: str) -> str:
+    model = load_model(MODEL_WEIGHTS)
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Could not open video at '{input_path}'")
 
-            if x2 <= x1 or y2 <= y1:
-                continue
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-            # Apply blur to detected PII region
-            self._blur_region(frame, x1, y1, x2, y2)
+    print(f"Processing video: {input_path}")
+    print(f"Video info: {width}x{height} @ {fps:.1f}fps, {total_frames} frames")
+    print(f"Device: {DEVICE}, Model: {MODEL_WEIGHTS}")
+    if USE_SAHI or USE_SAHI_SEG:
+        print(f"SAHI mode: {'segmentation' if USE_SAHI_SEG else 'box'}")
+        print(f"SAHI slices: {SAHI_SLICE_WIDTH}x{SAHI_SLICE_HEIGHT}, overlap: {SAHI_OVERLAP_RATIO}")
+    print(f"Confidence threshold: {CONF_THRESHOLD}, IOU: {IOU_THRESHOLD}")
+    print(f"Image size: {IMG_SIZE}, Upsample: {UPSAMPLE_SCALE}")
+    print("-" * 80)
 
-            # Store detection information
-            detection_info.append({
-                "bbox": [x1, y1, x2, y2],
-                "class": class_name,
-                "confidence": conf,
-                "class_id": cls_idx,
-                "threshold_used": threshold,
-                "blurred": True
-            })
-
-        return frame, detection_info
-
-    def _blur_region(self, frame: np.ndarray, x1: int, y1: int, x2: int, y2: int):
-        """Apply adaptive blur to a region with optional padding."""
-        # Add padding to ensure complete coverage
-        pad_x = int(0.05 * (x2 - x1))
-        pad_y = int(0.05 * (y2 - y1))
-
-        # Apply padding with bounds checking
-        sx1 = max(0, x1 - pad_x)
-        sy1 = max(0, y1 - pad_y)
-        sx2 = min(frame.shape[1], x2 + pad_x)
-        sy2 = min(frame.shape[0], y2 + pad_y)
-
-        # Extract ROI and apply blur
-        roi = frame[sy1:sy2, sx1:sx2]
-        if roi.size > 0:  # Ensure ROI is valid
-            roi_blurred = adaptive_blur(roi, self.blur_strength)
-            frame[sy1:sy2, sx1:sx2] = roi_blurred
-
-    def process_image(self, input_path: str, output_path: str) -> List[Dict[str, Any]]:
-        """
-        Process a single image for PII detection and blurring.
-
-        Args:
-            input_path: Path to input image
-            output_path: Path to save processed image
-
-        Returns:
-            List of detection information dictionaries
-        """
-        frame = cv2.imread(input_path)
-        if frame is None:
-            raise ValueError(f"Could not load image from {input_path}")
-
-        processed_frame, detection_info = self.process_frame(frame)
-
-        # Save processed image
-        cv2.imwrite(output_path, processed_frame)
-
-        print(f"✅ Processed image saved to: {output_path}")
-        print(f"Found {len(detection_info)} PII detections")
-
-        return detection_info
-
-    def process_video(self, input_path: str, output_path: str,
-                     frame_skip: int = 0) -> List[List[Dict[str, Any]]]:
-        """
-        Process video for PII detection and blurring.
-
-        Args:
-            input_path: Path to input video
-            output_path: Path to save processed video
-            frame_skip: Process every N frames (0 = process all frames)
-
-        Returns:
-            List of detection info for each processed frame
-        """
-        cap = cv2.VideoCapture(input_path)
-        if not cap.isOpened():
-            raise ValueError(f"Could not open video from {input_path}")
-
-        # Get video properties
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        # Set up video writer
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
-
-        all_detections = []
-        frame_idx = 0
-        processed_frames = 0
-
+    try:
+        frame_count = 0
         while True:
-            ret, frame = cap.read()
-            if not ret:
+            ok, frame = cap.read()
+            if not ok:
                 break
+            frame_count += 1
+            frame_start = time.time()
 
-            # Apply frame skipping if specified
-            if frame_skip > 0 and frame_idx % (frame_skip + 1) != 0:
-                out.write(frame)  # Write original frame
-                frame_idx += 1
-                continue
+            # Optionally upscale the frame for better small-object recall
+            original_h, original_w = frame.shape[:2]
+            work_frame = frame
+            if UPSAMPLE_SCALE and UPSAMPLE_SCALE > 1.0:
+                work_frame = cv2.resize(
+                    frame,
+                    (int(original_w * UPSAMPLE_SCALE), int(original_h * UPSAMPLE_SCALE)),
+                    interpolation=cv2.INTER_LINEAR,
+                )
 
-            # Process frame for PII
-            processed_frame, detection_info = self.process_frame(frame)
-            out.write(processed_frame)
-            all_detections.append(detection_info)
+            if USE_SAHI or USE_SAHI_SEG:
+                if not SAHI_AVAILABLE:
+                    raise ImportError("SAHI not installed. Install with: pip install sahi")
+                # lazy init SAHI model once
+                if 'sahi_model' not in locals():
+                    print(f"Initializing SAHI model...")
+                    sahi_model = AutoDetectionModel.from_pretrained(
+                        model_path=MODEL_WEIGHTS,
+                        model_type="ultralytics",
+                        confidence_threshold=CONF_THRESHOLD,
+                    )
+                    print(f"SAHI model loaded successfully")
 
-            processed_frames += 1
-            if processed_frames % 50 == 0:
-                print(f"Processed {processed_frames} frames ({frame_idx+1}/{total_frames})")
+                pred = get_sliced_prediction(
+                    work_frame,
+                    sahi_model,
+                    slice_height=SAHI_SLICE_HEIGHT,
+                    slice_width=SAHI_SLICE_WIDTH,
+                    overlap_height_ratio=SAHI_OVERLAP_RATIO,
+                    overlap_width_ratio=SAHI_OVERLAP_RATIO,
+                    verbose=0,
+                )
 
-            frame_idx += 1
+                # Log all detected objects first (limit output to prevent spam)
+                all_objects = []
+                for op in pred.object_prediction_list:
+                    cls_name = getattr(getattr(op, "category", None), "name", None)
+                    if cls_name:
+                        confidence = getattr(op, "score", 0.0)
+                        # Convert to float safely
+                        if hasattr(confidence, 'item'):
+                            confidence = float(confidence.item())
+                        elif hasattr(confidence, '__float__'):
+                            confidence = float(confidence)
+                        else:
+                            confidence = 0.0
+                        # Only log objects with reasonable confidence to reduce spam
+                        if confidence > 0.1:  # Higher threshold for logging
+                            all_objects.append((cls_name, confidence))
 
+                # Limit output to prevent spam - show top 20 by confidence
+                all_objects.sort(key=lambda x: x[1], reverse=True)
+                display_objects = all_objects[:20]
+                
+                print(f"Frame {frame_count:4d}/{total_frames}: SAHI detected {len(all_objects)} objects with conf>0.1 (showing top 20):")
+                for obj_name, conf in display_objects:
+                    print(f"  - {obj_name}: {conf:.3f}")
+                if len(all_objects) > 20:
+                    print(f"  ... and {len(all_objects) - 20} more objects")
+
+                # Filter for sensitive objects only
+                boxes: List[Tuple[int, int, int, int]] = []
+                detected_objects = []
+                for op in pred.object_prediction_list:
+                    cls_name = getattr(getattr(op, "category", None), "name", None)
+                    if not cls_name or cls_name not in SENSITIVE_CLASSES:
+                        continue
+                    x1, y1, x2, y2 = int(op.bbox.minx), int(op.bbox.miny), int(op.bbox.maxx), int(op.bbox.maxy)
+                    confidence = getattr(op, "score", 0.0)
+                    # Convert to float safely
+                    if hasattr(confidence, 'item'):
+                        confidence = float(confidence.item())
+                    elif hasattr(confidence, '__float__'):
+                        confidence = float(confidence)
+                    else:
+                        confidence = 0.0
+                    boxes.append((x1, y1, x2, y2))
+                    detected_objects.append((cls_name, confidence))
+
+                print(f"Frame {frame_count:4d}/{total_frames}: SAHI found {len(boxes)} sensitive objects:")
+                for obj_name, conf in detected_objects:
+                    print(f"  - {obj_name}: {conf:.3f}")
+
+                if USE_SAHI_SEG:
+                    processed = work_frame.copy()
+                    for (x1, y1, x2, y2) in boxes:
+                        x1, y1, x2, y2 = clamp_bbox((x1, y1, x2, y2), work_frame.shape[1], work_frame.shape[0])
+                        roi = processed[y1:y2, x1:x2]
+                        if roi.size == 0:
+                            continue
+                        roi_results = model.predict(
+                            roi,
+                            device=DEVICE,
+                            verbose=False,
+                            conf=CONF_THRESHOLD,
+                            imgsz=IMG_SIZE,
+                            iou=IOU_THRESHOLD,
+                            augment=TTA,
+                        )
+                        roi_result = roi_results[0]
+                        if hasattr(roi_result, "masks") and roi_result.masks is not None and hasattr(roi_result.masks, "data"):
+                            fully_blurred_roi = cv2.GaussianBlur(roi, ksize=BLUR_KERNEL, sigmaX=BLUR_SIGMA_X)
+                            names_map = roi_result.names if hasattr(roi_result, "names") else {}
+                            masks = roi_result.masks.data
+                            boxes_roi = roi_result.boxes
+                            num_instances = masks.shape[0]
+                            for i in range(num_instances):
+                                cls_idx = int(boxes_roi.cls[i].item()) if hasattr(boxes_roi, "cls") else None
+                                if cls_idx is None:
+                                    continue
+                                cls_name = names_map.get(cls_idx, None)
+                                if cls_name is None or cls_name not in SENSITIVE_CLASSES:
+                                    continue
+                                mask = masks[i].detach().cpu().numpy()
+                                mask = (mask >= 0.5).astype(np.uint8)
+                                if mask.shape[:2] != roi.shape[:2]:
+                                    mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
+                                mask_3c = np.repeat(mask[:, :, None], 3, axis=2)
+                                roi = np.where(mask_3c == 1, fully_blurred_roi, roi)
+                            processed[y1:y2, x1:x2] = roi
+                        else:
+                            blurred = cv2.GaussianBlur(roi, ksize=BLUR_KERNEL, sigmaX=BLUR_SIGMA_X)
+                            processed[y1:y2, x1:x2] = blurred
+                else:
+                    processed = apply_blur_to_regions(work_frame, boxes)
+            else:
+                print(f"Frame {frame_count:4d}/{total_frames}: Running single-shot detection...")
+                results = model.predict(
+                    work_frame,
+                    device=DEVICE,
+                    verbose=False,
+                    conf=CONF_THRESHOLD,
+                    imgsz=IMG_SIZE,
+                    iou=IOU_THRESHOLD,
+                    augment=TTA,
+                )
+                result = results[0]
+                boxes = []  # Initialize boxes variable
+                detected_objects = []
+                if hasattr(result, "masks") and result.masks is not None and hasattr(result.masks, "data"):
+                    processed = apply_blur_to_masks(work_frame, result, SENSITIVE_CLASSES)
+                    # Extract object info from masks
+                    if hasattr(result, "boxes") and result.boxes is not None:
+                        names_map = result.names if hasattr(result, "names") else {}
+                        for i, box in enumerate(result.boxes):
+                            cls_idx = int(box.cls.item()) if hasattr(box, "cls") else None
+                            if cls_idx is None:
+                                continue
+                            cls_name = names_map.get(cls_idx, None)
+                            if cls_name is None or cls_name not in SENSITIVE_CLASSES:
+                                continue
+                            confidence = float(box.conf.item()) if hasattr(box, "conf") else 0.0
+                            detected_objects.append((cls_name, confidence))
+                else:
+                    boxes = extract_sensitive_boxes(result, SENSITIVE_CLASSES)
+                    processed = apply_blur_to_regions(work_frame, boxes)
+                    # Extract object info from boxes
+                    if hasattr(result, "boxes") and result.boxes is not None:
+                        names_map = result.names if hasattr(result, "names") else {}
+                        for box in result.boxes:
+                            cls_idx = int(box.cls.item()) if hasattr(box, "cls") else None
+                            if cls_idx is None:
+                                continue
+                            cls_name = names_map.get(cls_idx, None)
+                            if cls_name is None or cls_name not in SENSITIVE_CLASSES:
+                                continue
+                            confidence = float(box.conf.item()) if hasattr(box, "conf") else 0.0
+                            detected_objects.append((cls_name, confidence))
+                print(f"Frame {frame_count:4d}/{total_frames}: Found {len(detected_objects)} sensitive objects")
+                for obj_name, conf in detected_objects:
+                    print(f"  - {obj_name}: {conf:.3f}")
+
+            # Downscale back to original frame size if we upsampled
+            if processed.shape[:2] != (original_h, original_w):
+                processed = cv2.resize(processed, (original_w, original_h), interpolation=cv2.INTER_AREA)
+
+            frame_time = time.time() - frame_start
+            print(f"Frame {frame_count:4d}/{total_frames}: Processed in {frame_time:.3f}s")
+
+            out.write(processed)
+    finally:
         cap.release()
         out.release()
 
-        print(f"✅ Video processing complete. Saved to: {output_path}")
-        print(f"Processed {processed_frames} frames with PII detection")
+    print(f"Video processing complete: {frame_count} frames processed")
+    return output_path
 
-        return all_detections
 
-    def test_detection(self, test_prompt: str = "person") -> bool:
-        """
-        Test if the PII detector is working correctly.
-        
-        Args:
-            test_prompt: Test prompt to verify functionality
-            
-        Returns:
-            True if test successful, False otherwise
-        """
-        try:
-            print(f"🧪 Testing PII detection with: '{test_prompt}'")
-            
-            # Create a simple test image
-            test_image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-            
-            # Test the detection
-            results = self.model.predict(test_image, verbose=False)
-            
-            if results and len(results) > 0:
-                print("✅ PII detection test successful!")
-                return True
-            else:
-                print("⚠️  PII detection test returned no results")
-                return False
-                
-        except Exception as e:
-            print(f"❌ PII detection test failed: {e}")
-            return False
-
-# -----------------------------
-# Convenience functions for different use cases
-# -----------------------------
-def quick_image_blur(input_path: str, output_path: str,
-                    model_size: str = "l", sensitivity: str = "high_sensitivity") -> Dict[str, Any]:
-    """
-    Quick function to blur PII in an image.
-
-    Args:
-        input_path: Input image path
-        output_path: Output image path
-        model_size: YOLOE model size ("s", "m", "l")
-        sensitivity: Sensitivity level for detection
-    """
-    model_name = f"yoloe-11{model_size}-seg.pt"
-    detector = YOLOEPIIDetector(model_name, sensitivity)
-    detections = detector.process_image(input_path, output_path)
-
-    return {
-        "input_path": input_path,
-        "output_path": output_path,
-        "detections_count": len(detections),
-        "detections": detections
-    }
-
-def quick_video_blur(input_path: str, output_path: str,
-                    model_size: str = "l", sensitivity: str = "high_sensitivity",
-                    frame_skip: int = 0) -> Dict[str, Any]:
-    """
-    Quick function to blur PII in a video.
-
-    Args:
-        input_path: Input video path
-        output_path: Output video path
-        model_size: YOLOE model size ("s", "m", "l")
-        sensitivity: Sensitivity level for detection
-        frame_skip: Skip frames for faster processing (0 = process all)
-    """
-    model_name = f"yoloe-11{model_size}-seg.pt"
-    detector = YOLOEPIIDetector(model_name, sensitivity)
-    all_detections = detector.process_video(input_path, output_path, frame_skip)
-
-    total_detections = sum(len(frame_detections) for frame_detections in all_detections)
-
-    return {
-        "input_path": input_path,
-        "output_path": output_path,
-        "frames_processed": len(all_detections),
-        "total_detections": total_detections,
-        "detections_by_frame": all_detections
-    }
-
-# -----------------------------
-# Advanced: Custom class configuration
-# -----------------------------
-def create_custom_pii_detector(custom_classes: List[str],
-                              model_size: str = "l",
-                              custom_thresholds: Dict[str, float] = None) -> YOLOEPIIDetector:
-    """
-    Create a PII detector with custom classes and thresholds.
-
-    Args:
-        custom_classes: List of custom PII classes to detect
-        model_size: YOLOE model size
-        custom_thresholds: Custom confidence thresholds per class
-    """
-    global SENSITIVE_CLASSES
-    original_classes = SENSITIVE_CLASSES.copy()
-
-    # Update global classes temporarily
-    SENSITIVE_CLASSES = custom_classes
-
-    # Create custom threshold configuration
-    if custom_thresholds:
-        custom_config = {"default": 0.5}
-        custom_config.update(custom_thresholds)
-        CONFIDENCE_THRESHOLDS["custom"] = custom_config
-        sensitivity_level = "custom"
+def main():
+    # Auto-detect by extension
+    treat_as_video = is_video(INPUT_PATH)
+    if treat_as_video:
+        out_path = process_video(INPUT_PATH, OUTPUT_PATH)
+        print(f"Saved blurred video to: {out_path}")
     else:
-        sensitivity_level = "medium_sensitivity"
+        out_path = process_image(INPUT_PATH, OUTPUT_PATH)
+        print(f"Saved blurred image to: {out_path}")
 
-    model_name = f"yoloe-11{model_size}-seg.pt"
-    detector = YOLOEPIIDetector(model_name, sensitivity_level)
-
-    # Restore original classes
-    SENSITIVE_CLASSES = original_classes
-
-    return detector
-
-# -----------------------------
-# Example usage and testing
-# -----------------------------
-def demo_basic_usage():
-    """Demonstrate basic PII detection usage."""
-    print("=== YOLOv11e PII Detection Demo ===")
-
-    # Initialize detector
-    detector = YOLOEPIIDetector(model_name="yoloe-11l-seg.pt")
-
-    # Test detection
-    detector.test_detection()
-
-    print("Detector ready. Use detector.process_image() or detector.process_video()")
-    return detector
-
-def demo_custom_classes():
-    """Demonstrate custom class detection."""
-    print("=== Custom PII Classes Demo ===")
-
-    # Define custom PII classes
-    custom_classes = ["credit card", "passport", "driver license", "face", "phone screen"]
-    custom_thresholds = {
-        "credit card": 0.3,
-        "passport": 0.2,
-        "face": 0.6
-    }
-
-    detector = create_custom_pii_detector(custom_classes, "m", custom_thresholds)
-    print("Custom detector ready with classes:", custom_classes)
-    return detector
-
-def batch_process_directory(input_dir: str, output_dir: str,
-                          file_extensions: List[str] = [".jpg", ".jpeg", ".png"]):
-    """
-    Process all images in a directory for PII detection.
-    """
-    detector = YOLOEPIIDetector()
-    input_path = Path(input_dir)
-    output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True)
-
-    processed_files = []
-
-    for ext in file_extensions:
-        for img_file in input_path.glob(f"*{ext}"):
-            output_file = output_path / f"blurred_{img_file.name}"
-            try:
-                detections = detector.process_image(str(img_file), str(output_file))
-                processed_files.append({
-                    "file": str(img_file),
-                    "output": str(output_file),
-                    "detections": len(detections)
-                })
-                print(f"✓ Processed {img_file.name}: {len(detections)} PII detections")
-            except Exception as e:
-                print(f"✗ Error processing {img_file.name}: {e}")
-
-    return processed_files
 
 if __name__ == "__main__":
-    # Basic usage example
-    print("YOLOv11e PII Detection Pipeline")
-    print("Choose your usage pattern:")
-    print("1. Basic detector: demo_basic_usage()")
-    print("2. Custom classes: demo_custom_classes()")
-    print("3. Quick image: quick_image_blur('input.jpg', 'output.jpg')")
-    print("4. Quick video: quick_video_blur('input.mp4', 'output.mp4')")
-    print("5. Batch directory: batch_process_directory('input_dir/', 'output_dir/')")
-
-    # Uncomment to run basic demo
-    # detector = demo_basic_usage()
-
-    # Example of processing specific files:
-    quick_image_blur("test1.jpg", "blurred_image.jpg", model_size="l")
-    # quick_video_blur("test_video.mp4", "blurred_video.mp4", model_size="m", frame_skip=2)
+    main()
