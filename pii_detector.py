@@ -21,13 +21,12 @@ SENSITIVE_CLASSES: List[str] = [
     "credit card",
     "bank card",
     "card",
-    "watermark overlay stamp",
     "wedding invitation",
 ]
 
 # Blur strength configuration (kernel must be odd numbers)
-BLUR_KERNEL: Tuple[int, int] = (25, 25)
-BLUR_SIGMA_X: int = 0
+BLUR_KERNEL: Tuple[int, int] = (99, 99)  # Very aggressive blur for maximum privacy
+BLUR_SIGMA_X: int = 30  # High sigma for very strong blur effect
 
 # Model weights and device
 MODEL_WEIGHTS: str = "yoloe-11l-seg-pf.pt"
@@ -35,21 +34,21 @@ DEVICE: str = "mps"  # set to "cpu" if MPS/CUDA unavailable
 
 # Inference tuning for small objects - PRIORITIZING ACCURACY
 CONF_THRESHOLD: float = 0.05  # Very low threshold to catch all potential objects
-IMG_SIZE: int = 2560          # Large inference size for small object detail
-UPSAMPLE_SCALE: float = 2.0   # 2x upsampling for better small object detection
+IMG_SIZE: int = 1920          # Large inference size for small object detail
+UPSAMPLE_SCALE: float = 1.0   # 2x upsampling for better small object detection
 IOU_THRESHOLD: float = 0.3    # Lower IOU to allow overlapping detections (better recall)
 TTA: bool = True             # Enable test-time augmentation for better accuracy
 
 # SAHI configuration - OPTIMIZED FOR SMALL OBJECTS
 USE_SAHI: bool = True
-USE_SAHI_SEG: bool = True
+USE_SAHI_SEG: bool = False  # Disable segmentation mode to use bounding box blur instead
 SAHI_SLICE_HEIGHT: int = 384  # Smaller slices for small objects
 SAHI_SLICE_WIDTH: int = 384   # Smaller slices for small objects
 SAHI_OVERLAP_RATIO: float = 0.4  # High overlap to catch objects at slice boundaries
 
 # I/O configuration (built-in, no CLI)
-INPUT_PATH: str = "car_vid.mp4"  # can be image or video
-OUTPUT_PATH: str = "car_vid_blurred.mp4"
+INPUT_PATH: str = "id.jpeg"  # can be image or video
+OUTPUT_PATH: str = "id_blurred.jpeg"
 
 
 def load_model(weights: str) -> YOLOE:
@@ -115,11 +114,13 @@ def apply_blur_to_regions(image: np.ndarray, boxes: List[Tuple[int, int, int, in
     h, w = image.shape[:2]
     output = image.copy()
 
-    for (x1, y1, x2, y2) in boxes:
+    for i, (x1, y1, x2, y2) in enumerate(boxes):
         x1, y1, x2, y2 = clamp_bbox((x1, y1, x2, y2), w, h)
         region = output[y1:y2, x1:x2]
         if region.size == 0:
             continue
+        print(f"    Blurring box {i}: ({x1}, {y1}, {x2}, {y2}) - size: {x2-x1}x{y2-y1}")
+        # Use very aggressive Gaussian blur
         blurred = cv2.GaussianBlur(region, ksize=BLUR_KERNEL, sigmaX=BLUR_SIGMA_X)
         output[y1:y2, x1:x2] = blurred
 
@@ -205,12 +206,18 @@ def process_image(input_path: str, output_path: str) -> str:
                 continue
             x1, y1, x2, y2 = int(op.bbox.minx), int(op.bbox.miny), int(op.bbox.maxx), int(op.bbox.maxy)
             confidence = getattr(op, "score", 0.0)
+            # Convert PredictionScore to float for SAHI
+            if hasattr(confidence, 'value'):
+                confidence = float(confidence.value)
+            else:
+                confidence = float(confidence)
             boxes.append((x1, y1, x2, y2))
             detected_objects.append((cls_name, confidence))
 
         print(f"SAHI found {len(boxes)} sensitive objects:")
-        for obj_name, conf in detected_objects:
-            print(f"  - {obj_name}: {conf:.3f}")
+        for i, (obj_name, conf) in enumerate(detected_objects):
+            x1, y1, x2, y2 = boxes[i]
+            print(f"  - {obj_name}: {conf:.3f} at box ({x1}, {y1}, {x2}, {y2})")
 
         if USE_SAHI_SEG:
             seg_model = load_model(MODEL_WEIGHTS)
@@ -244,10 +251,15 @@ def process_image(input_path: str, output_path: str) -> str:
                         if cls_name is None or cls_name not in SENSITIVE_CLASSES:
                             continue
                         mask = masks[i].detach().cpu().numpy()
-                        mask = (mask >= 0.5).astype(np.uint8)
+                        # Lower threshold for more aggressive masking
+                        mask = (mask >= 0.05).astype(np.uint8)
                         if mask.shape[:2] != roi.shape[:2]:
                             mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
                         mask_3c = np.repeat(mask[:, :, None], 3, axis=2)
+                        # Debug: print mask info
+                        mask_pixels = np.sum(mask)
+                        roi_pixels = roi.shape[0] * roi.shape[1]
+                        print(f"    Mask {i}: {mask_pixels}/{roi_pixels} pixels ({mask_pixels/roi_pixels*100:.1f}%)")
                         roi = np.where(mask_3c == 1, fully_blurred_roi, roi)
                     processed[y1:y2, x1:x2] = roi
                 else:
