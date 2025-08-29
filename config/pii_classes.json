@@ -1,0 +1,127 @@
+{
+  "sensitive_classes": {
+    "identity_documents": [
+      "passport",
+      "driver license", 
+      "id card",
+      "credit card",
+      "debit card",
+      "bank card",
+      "identity card",
+      "national id",
+      "social security card",
+      "birth certificate",
+      "citizenship document"
+    ],
+    "personal_information": [
+      "phone number",
+      "email address",
+      "address",
+      "signature",
+      "license plate",
+      "vehicle plate",
+      "barcode",
+      "qr code"
+    ],
+    "financial_documents": [
+      "bank statement",
+      "receipt",
+      "invoice",
+      "check",
+      "financial document",
+      "tax form",
+      "pay stub"
+    ],
+    "medical_records": [
+      "medical record",
+      "prescription",
+      "health card",
+      "medical document",
+      "patient form",
+      "lab result",
+      "doctor note",
+      "medical certificate"
+    ],
+    "biometric_data": [
+      "fingerprint",
+      "face",
+      "person",
+      "child",
+      "minor"
+    ],
+    "general_documents": [
+      "document",
+      "contract",
+      "letter",
+      "form",
+      "certificate"
+    ],
+    "digital_displays": [
+      "screen",
+      "monitor",
+      "tablet",
+      "phone screen",
+      "computer screen",
+      "pin entry",
+      "password field",
+      "login screen",
+      "email client",
+      "banking app",
+      "social media"
+    ]
+  },
+  "confidence_thresholds": {
+    "high_sensitivity": {
+      "passport": 0.3,
+      "driver license": 0.3,
+      "credit card": 0.3,
+      "social security card": 0.3,
+      "face": 0.4,
+      "person": 0.5,
+      "default": 0.3
+    },
+    "medium_sensitivity": {
+      "default": 0.5
+    },
+    "low_sensitivity": {
+      "default": 0.7
+    }
+  },
+  "blur_strengths": {
+    "light": {
+      "multiplier": 0.04,
+      "description": "Subtle blurring for minimal visual impact"
+    },
+    "medium": {
+      "multiplier": 0.06,
+      "description": "Standard blurring for privacy protection"
+    },
+    "heavy": {
+      "multiplier": 0.08,
+      "description": "Strong blurring for maximum privacy"
+    }
+  },
+  "model_configurations": {
+    "yoloe-11s-seg.pt": {
+      "size": "small",
+      "speed": "fastest",
+      "accuracy": "lower",
+      "memory": "2-4 GB",
+      "use_case": "Real-time processing, limited resources"
+    },
+    "yoloe-11m-seg.pt": {
+      "size": "medium",
+      "speed": "balanced",
+      "accuracy": "balanced",
+      "memory": "4-6 GB",
+      "use_case": "General purpose, good balance"
+    },
+    "yoloe-11l-seg.pt": {
+      "size": "large",
+      "speed": "slowest",
+      "accuracy": "highest",
+      "memory": "6-8 GB",
+      "use_case": "Maximum accuracy, offline processing"
+    }
+  }
+}
