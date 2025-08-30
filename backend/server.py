@@ -96,7 +96,6 @@ async def process_file_endpoint(
                 out_video_path=str(output_path),
                 imgsz=640,
                 conf=0.25,
-                padding_px=2,
                 pixel_size=14,
                 verbose=False
             )

@@ -6,7 +6,7 @@ import os
 from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 from moviepy.editor import VideoFileClip
-from backend.scripts.tracker import BoxTracker
+from .tracker import BoxTracker
 
 model = YOLOE('yoloe-11m-seg.pt')
 

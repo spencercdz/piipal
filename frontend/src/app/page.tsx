@@ -12,6 +12,8 @@ interface FileInfo {
   filename: string;
   size: number;
   download_url: string;
+  originalFileUrl?: string; // Store the blob URL of the original uploaded file
+  censoredFile?: string; // Store the censored file name
 }
 
 interface ProcessingResult {
@@ -32,6 +34,8 @@ export default function Home() {
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [showControls, setShowControls] = useState(false);
+  const [showOriginalControls, setShowOriginalControls] = useState(false);
+  const [showCensoredControls, setShowCensoredControls] = useState(false);
   const [selectedCensoredFile, setSelectedCensoredFile] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -45,6 +49,15 @@ export default function Home() {
     return file ? URL.createObjectURL(file) : null;
   }, [file]);
 
+  // Memoize video URLs to prevent unnecessary re-renders
+  const originalVideoUrl = useMemo(() => {
+    return file ? URL.createObjectURL(file) : undefined;
+  }, [file]);
+
+  const censoredVideoUrl = useMemo(() => {
+    return result ? `${API_BASE_URL}/download/${result.output_file}` : undefined;
+  }, [result]);
+
   // Cleanup video URL when component unmounts or file changes
   useEffect(() => {
     return () => {
@@ -54,6 +67,23 @@ export default function Home() {
     };
   }, [videoUrl]);
 
+  // Cleanup memoized video URLs
+  useEffect(() => {
+    return () => {
+      if (originalVideoUrl) {
+        URL.revokeObjectURL(originalVideoUrl);
+      }
+    };
+  }, [originalVideoUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (censoredVideoUrl && censoredVideoUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(censoredVideoUrl);
+      }
+    };
+  }, [censoredVideoUrl]);
+
   // Cleanup controls timeout when component unmounts
   useEffect(() => {
     return () => {
@@ -62,6 +92,17 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      processedFiles.forEach(fileInfo => {
+        if (fileInfo.originalFileUrl) {
+          URL.revokeObjectURL(fileInfo.originalFileUrl);
+        }
+      });
+    };
+  }, [processedFiles]);
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -196,6 +237,10 @@ export default function Home() {
     }
   }, []);
 
+  const resetVideoStates = useCallback(() => {
+    setShowControls(false);
+  }, []);
+
   const addToRecentFiles = useCallback((newFile: FileInfo) => {
     setProcessedFiles(prev => {
       const updated = [newFile, ...prev.filter(f => f.filename !== newFile.filename)];
@@ -231,8 +276,10 @@ export default function Home() {
       // Add to recent files
       const newFile: FileInfo = {
         filename: resultData.output_file,
-        size: 0, // We don't have size info from the response, will be updated when fetched
-        download_url: resultData.download_url
+        size: file.size, // Use the original file size
+        download_url: resultData.download_url,
+        originalFileUrl: URL.createObjectURL(file), // Store the blob URL of the original uploaded file
+        censoredFile: resultData.output_file // Store the censored file name
       };
       addToRecentFiles(newFile);
       
@@ -517,7 +564,7 @@ export default function Home() {
             </div>
             <div className="flex space-x-4">
               <a 
-                href="https://devpost.com" 
+                href="https://devpost.com/software/piipal" 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"
@@ -533,7 +580,7 @@ export default function Home() {
                 GitHub
               </a>
               <a 
-                href="#demo" 
+                href="https://devpost.com/software/piipal" 
                 className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white px-6 py-2 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow"
               >
                 Demo
@@ -669,21 +716,20 @@ export default function Home() {
                       {/* Original File */}
                       <div>
                         <h4 className="text-white font-medium mb-3 text-center">Original</h4>
-                        <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden" onMouseEnter={() => setShowControls(true)} onMouseLeave={() => setShowControls(false)}>
+                        <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden">
                           {fileType === 'video' ? (
-                            <>
+                            <div className="relative" onMouseEnter={() => setShowOriginalControls(true)} onMouseLeave={() => setShowOriginalControls(false)}>
                               <video
+                                key="original-video"
                                 ref={originalVideoRef}
-                                src={file ? URL.createObjectURL(file) : undefined}
+                                src={originalVideoUrl}
                                 className="w-full h-auto max-h-[40vh] max-w-full object-contain cursor-pointer"
                                 autoPlay
                                 loop
                                 muted
-                                onTimeUpdate={() => {
-                                  if (originalVideoRef.current && censoredVideoRef.current) {
-                                    censoredVideoRef.current.currentTime = originalVideoRef.current.currentTime;
-                                  }
-                                }}
+                                onLoadStart={() => console.log('Original video loading started')}
+                                onLoadedData={() => console.log('Original video loaded successfully')}
+                                onError={(e) => console.error('Original video error:', e)}
                                 onClick={(e) => {
                                   const video = e.currentTarget;
                                   if (video.paused) {
@@ -693,15 +739,35 @@ export default function Home() {
                                   }
                                 }}
                               />
-                              {/* Play/Pause Indicator */}
-                              {showControls && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity duration-200">
-                                  <div className="bg-black/50 rounded-full p-3">
-                                    <Play className="h-6 w-6 text-white" />
+                              {/* Fallback if video doesn't load */}
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-800/50 opacity-0 hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                                <p className="text-white text-sm">Click to play/pause</p>
+                              </div>
+                              {/* Video Controls for Original */}
+                              {showOriginalControls && (
+                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-all duration-200">
+                                  <div className="flex items-center justify-center space-x-4">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const video = originalVideoRef.current;
+                                        if (video) {
+                                          if (video.paused) {
+                                            video.play();
+                                          } else {
+                                            video.pause();
+                                          }
+                                        }
+                                      }}
+                                      className="bg-white/20 hover:bg-white/30 text-white p-2 rounded-full transition-all duration-200 hover-lift"
+                                      title="Play/Pause"
+                                    >
+                                      {originalVideoRef.current?.paused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+                                    </button>
                                   </div>
                                 </div>
                               )}
-                            </>
+                            </div>
                           ) : (
                             <img
                               src={file ? URL.createObjectURL(file) : undefined}
@@ -714,23 +780,22 @@ export default function Home() {
                       </div>
                       
                       {/* Censored File */}
-                <div>
+                      <div>
                         <h4 className="text-white font-medium mb-3 text-center">Censored</h4>
-                        <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden" onMouseEnter={() => setShowControls(true)} onMouseLeave={() => setShowControls(false)}>
+                        <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden">
                           {fileType === 'video' ? (
-                            <>
+                            <div className="relative" onMouseEnter={() => setShowCensoredControls(true)} onMouseLeave={() => setShowCensoredControls(false)}>
                               <video
+                                key="censored-video"
                                 ref={censoredVideoRef}
-                                src={`${API_BASE_URL}/download/${result.output_file}`}
+                                src={censoredVideoUrl}
                                 className="w-full h-auto max-h-[40vh] max-w-full object-contain cursor-pointer"
                                 autoPlay
                                 loop
                                 muted
-                                onTimeUpdate={() => {
-                                  if (censoredVideoRef.current && originalVideoRef.current) {
-                                    originalVideoRef.current.currentTime = censoredVideoRef.current.currentTime;
-                                  }
-                                }}
+                                onLoadStart={() => console.log('Censored video loading started')}
+                                onLoadedData={() => console.log('Censored video loaded successfully')}
+                                onError={(e) => console.error('Censored video error:', e)}
                                 onClick={(e) => {
                                   const video = e.currentTarget;
                                   if (video.paused) {
@@ -740,15 +805,35 @@ export default function Home() {
                                   }
                                 }}
                               />
-                              {/* Play/Pause Indicator */}
-                              {showControls && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity duration-200">
-                                  <div className="bg-black/50 rounded-full p-3">
-                                    <Play className="h-6 w-6 text-white" />
+                              {/* Fallback if video doesn't load */}
+                              <div className="absolute inset-0 flex items-center justify-center bg-gray-800/50 opacity-0 hover:opacity-100 transition-opacity duration-200 pointer-events-none">
+                                <p className="text-white text-sm">Click to play/pause</p>
+                              </div>
+                              {/* Video Controls for Censored */}
+                              {showCensoredControls && (
+                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-all duration-200">
+                                  <div className="flex items-center justify-center space-x-4">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const video = censoredVideoRef.current;
+                                        if (video) {
+                                          if (video.paused) {
+                                            video.play();
+                                          } else {
+                                            video.pause();
+                                          }
+                                        }
+                                      }}
+                                      className="bg-white/20 hover:bg-white/30 text-white p-2 rounded-full transition-all duration-200 hover-lift"
+                                      title="Play/Pause"
+                                    >
+                                      {censoredVideoRef.current?.paused ? <Play className="h-5 w-5" /> : <Pause className="h-5 w-5" />}
+                                    </button>
                                   </div>
                                 </div>
                               )}
-                            </>
+                            </div>
                           ) : (
                             <img
                               src={`${API_BASE_URL}/download/${result.output_file}`}
@@ -758,17 +843,17 @@ export default function Home() {
                             />
                           )}
                         </div>
-                </div>
-              </div>
+                      </div>
+                    </div>
 
                     {/* Success Message */}
                     <div className="bg-green-900/20 border border-green-700 rounded-lg p-4 flex items-center space-x-3 mb-6">
                       <CheckCircle className="h-6 w-6 text-green-400" />
-                      <div>
+                <div>
                         <p className="font-medium text-green-300">{result.message}</p>
                         <p className="text-green-400 text-sm">Output: {result.output_file}</p>
-                      </div>
-                    </div>
+                </div>
+              </div>
 
                     {/* Action Buttons */}
                     <div className="flex items-center justify-center space-x-4">
@@ -785,6 +870,7 @@ export default function Home() {
                           setFile(null);
                           setResult(null);
                           setError(null);
+                          resetVideoStates(); // Reset video states when starting a new file
                         }}
                         className="bg-[hsl(var(--tiktok-blue))] hover:bg-[hsl(var(--tiktok-blue))]/90 text-white py-3 px-6 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover-lift hover-glow"
                       >
@@ -836,14 +922,14 @@ export default function Home() {
                           {isVideo ? (
                             <video
                               className="w-full h-full object-cover"
-                              src={`${API_BASE_URL}/download/${fileInfo.filename}`}
+                              src={fileInfo.originalFileUrl || `${API_BASE_URL}/download/${fileInfo.filename}`}
                               muted
                               loop
                               preload="metadata"
                             />
                           ) : isImage ? (
                             <img
-                              src={`${API_BASE_URL}/download/${fileInfo.filename}`}
+                              src={fileInfo.originalFileUrl || `${API_BASE_URL}/download/${fileInfo.filename}`}
                               alt={`Preview of ${fileInfo.filename}`}
                               className="w-full h-full object-cover"
                               loading="lazy"
@@ -869,6 +955,10 @@ export default function Home() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  // Clean up blob URL if it exists
+                                  if (fileInfo.originalFileUrl) {
+                                    URL.revokeObjectURL(fileInfo.originalFileUrl);
+                                  }
                                   // Remove file from processed files
                                   setProcessedFiles(prev => prev.filter(f => f.filename !== fileInfo.filename));
                                   // Remove from localStorage
@@ -927,7 +1017,11 @@ export default function Home() {
                        selectedCensoredFile.toLowerCase().includes('.mov') ? (
                         <video
                           className="w-full h-auto max-h-[50vh] max-w-full object-contain cursor-pointer"
-                          src={`${API_BASE_URL}/download/${selectedCensoredFile}`}
+                          src={(() => {
+                            // Find the file info to get the original file
+                            const fileInfo = processedFiles.find(f => f.filename === selectedCensoredFile);
+                            return fileInfo?.originalFileUrl ? fileInfo.originalFileUrl : `${API_BASE_URL}/download/${selectedCensoredFile}`;
+                          })()}
                           autoPlay
                           loop
                           muted
@@ -943,7 +1037,11 @@ export default function Home() {
                         />
                       ) : (
                         <img
-                          src={`${API_BASE_URL}/download/${selectedCensoredFile}`}
+                          src={(() => {
+                            // Find the file info to get the original file
+                            const fileInfo = processedFiles.find(f => f.filename === selectedCensoredFile);
+                            return fileInfo?.originalFileUrl ? fileInfo.originalFileUrl : `${API_BASE_URL}/download/${selectedCensoredFile}`;
+                          })()}
                           alt={`Full preview of ${selectedCensoredFile}`}
                           className="w-full h-auto max-h-[50vh] max-w-full object-contain"
                           loading="lazy"
