@@ -3,31 +3,22 @@ import numpy as np
 import easyocr
 import re
 import torch
-from transformers import AutoTokenizer, AutoModelForTokenClassification
 
 # Load OCR model
 print("Loading EasyOCR model...")
 reader = easyocr.Reader(["en"], gpu=True)
 print("EasyOCR model loaded successfully")
 
-# Load PII detection model
-print("Loading PII detection model...")
-model_name = "iiiorg/piiranha-v1-detect-personal-information"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForTokenClassification.from_pretrained(model_name)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-print(f"PII model loaded on device: {device}")
-
-
-# 1) REGEX/PII detection model
+# 1) REGEX patterns for PII detection
 PATTERNS = {
     "credit_card": re.compile(r"(?:\d{4}[-\s]?){3}\d{4}"),
     "email":       re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     "phone":       re.compile(r"(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{1,4}\)?[-.\s]?){1,4}\d{1,4}"),
     "alphanum":    re.compile(r"(?=\w*\d)(?=\w*[A-Za-z])[A-Za-z0-9]{3,}"),
-    "numeric":     re.compile(r"\b\d{4,}\b")
+    "numeric":     re.compile(r"\b\d{4,}\b"),
+    "ssn":         re.compile(r"\d{3}-\d{2}-\d{4}"),
+    "date":        re.compile(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}"),
+    "address":     re.compile(r"\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr)"),
 }
 def looks_sensitive(text, nlp=False):
     if nlp:
@@ -56,7 +47,8 @@ def looks_sensitive(text, nlp=False):
         
         return False
 
-    else:
+    except Exception as e:
+        print(f'Error in PII model for text "{text}": {e}, falling back to REGEX.')
         t = text.strip()
         if not t:
             return False
@@ -182,7 +174,7 @@ def censor_frame_consistent(
 
     # 5.2 Update tracker
     tracker.update(dets)
-    (f"Updating tracker with {len(dets)} sensitive detections...")
+    print(f"Updating tracker with {len(dets)} sensitive detections...")
 
     # 5.3 Redact all active tracks
     out = frame.copy()
@@ -266,13 +258,12 @@ def process_video_consistent(
 
 # 7) Usage
 out_vid = process_video_consistent(
-    "data/test2.mp4",
-    output_path="data/test2_blurred.mp4",
+    "data/car_vid.mp4",
+    output_path="data/car_vid_blurred.mp4",
     pad=0,
     min_prob=0.1,
     max_lost=15, iou_thresh=0.2,
     redaction_mode="pixelate",
     ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
-    debug=False,
-    nlp=False
+    debug=False
 )

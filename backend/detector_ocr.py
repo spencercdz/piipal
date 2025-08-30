@@ -130,7 +130,7 @@ def censor_frame_consistent(
         dets.append(((x, y, w, h), text))
 
     # 5.2 Update tracker
-tracker.update(dets)
+    tracker.update(dets)
 
     # 5.3 Redact all active tracks
     out = frame.copy()
