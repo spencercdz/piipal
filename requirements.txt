@@ -5,3 +5,5 @@ Pillow>=10.0.0
 torch>=2.0.0
 torchvision>=0.15.0
 clip>=0.15.0
+easyocr
+transformers
