@@ -20,6 +20,7 @@ PATTERNS = {
     "date":        re.compile(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}"),
     "address":     re.compile(r"\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr)"),
 }
+<<<<<<< HEAD
 def looks_sensitive(text, nlp=False):
     if nlp:
         # Default to all non-O labels for now
@@ -47,31 +48,14 @@ def looks_sensitive(text, nlp=False):
         
         return False
 
-def looks_sensitive(text):
-    """Check if text contains sensitive information using regex patterns"""
-    t = text.strip()
-    if not t:
-        return False
-    
-    # Check against all patterns
-    for pattern_name, pattern in PATTERNS.items():
-        if pattern.search(t):
-            print(f"REGEX detected: '{text}' as {pattern_name}")
-            return True
-    
-    # Additional checks for common PII indicators
-    # Check for all caps text (likely names or important info)
-    if t.isupper() and len(t) > 2:
-        print(f"UPPERCASE detected: '{text}'")
-        return True
-    
-    # Check for mixed case with numbers (likely IDs or codes)
-    if any(c.isdigit() for c in t) and any(c.isalpha() for c in t) and len(t) >= 6:
-        print(f"MIXED ALPHANUMERIC detected: '{text}'")
-        return True
-    
-    return False
-
+    else:
+        t = text.strip()
+        if not t:
+            return False
+        for pat in PATTERNS.values():
+            if pat.search(t):
+                print(f"REGEX detected: '{text}' as {pat}")
+                return True
 # 2) Simple IoU
 def compute_iou(a, b):
     xA = max(a[0], b[0]); yA = max(a[1], b[1])
@@ -270,6 +254,20 @@ def process_video_consistent(
 
     return output_path
 
+<<<<<<< HEAD
+# 7) Usage
+out_vid = process_video_consistent(
+    "data/test2.mp4",
+    output_path="data/test2_blurred.mp4",
+    pad=0,
+    min_prob=0.1,
+    max_lost=15, iou_thresh=0.2,
+    redaction_mode="pixelate",
+    ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
+    debug=False,
+    nlp=False
+)
+=======
 # 7) Usage example (commented out to avoid running on import)
 # out_vid = process_video_consistent(
 #     "data/car_vid.mp4",
@@ -281,3 +279,4 @@ def process_video_consistent(
 #     ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
 #     debug=False
 # )
+>>>>>>> 29c3d4c (simple frontend for testing)
