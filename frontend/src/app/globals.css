@@ -1,26 +1,81 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* TikTok specific colors - exact from user */
+  --tiktok-red: 0 72% 51%;
+  --tiktok-pink: 322 100% 50%;
+  --tiktok-blue: 193 100% 50%;
+  --sidebar-bg: 0 0% 8%;
+  --video-bg: 0 0% 6%;
+  --interaction-bg: 0 0% 8%;
+  
+  /* Extended TikTok palette */
+  --background: 0 0% 8%;
+  --foreground: 0 0% 98%;
+  --card-background: 0 0% 12%;
+  --border-color: 0 0% 18%;
+  --muted: 0 0% 45%;
+  --accent: 0 0% 90%;
+  --hover-bg: 0 0% 15%;
+  --active-bg: 0 0% 20%;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-tiktok-red: var(--tiktok-red);
+  --color-tiktok-pink: var(--tiktok-pink);
+  --color-tiktok-blue: var(--tiktok-blue);
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-video-bg: var(--video-bg);
+  --color-interaction-bg: var(--interaction-bg);
+  --color-card-background: var(--card-background);
+  --color-border: var(--border-color);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-hover-bg: var(--hover-bg);
+  --color-active-bg: var(--active-bg);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Enhanced transitions and hover effects */
+* {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Enhanced focus styles */
+*:focus {
+  outline: 2px solid hsl(var(--tiktok-red));
+  outline-offset: 2px;
+}
+
+/* Custom gradient text utility */
+.gradient-text {
+  background: linear-gradient(90deg, hsl(var(--tiktok-red)), hsl(var(--tiktok-blue)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-blue {
+  background: linear-gradient(90deg, hsl(var(--tiktok-blue)), hsl(var(--tiktok-red)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Enhanced hover effects */
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+.hover-glow {
+  transition: box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-glow:hover {
+  box-shadow: 0 0 20px rgba(255, 0, 0, 0.3);
 }
