@@ -414,15 +414,25 @@ def main():
     #         output_image, dets = run_image_pixelate(model, path, outdir, imgsz=640, conf=0.2, verbose=False)
     #         print(f"Detections: {dets}")
     
-    run_video_censor(
+    # run_video_censor(
+    #     model,
+    #     in_video_path="./backend/data/HD_car_vid.MP4",
+    #     out_video_path="./backend/data/HD_car_vid_pixelated_stable.mp4",
+    #     imgsz=640,
+    #     conf=0.15,
+    #     pixel_size=16,  # increase for stronger pixelation
+    #     verbose=False
+    # )
+    
+    results = run_video_censor_send_bboxes(
         model,
         in_video_path="./backend/data/HD_car_vid.MP4",
-        out_video_path="./backend/data/HD_car_vid_pixelated_stable.mp4",
         imgsz=640,
         conf=0.15,
         pixel_size=16,  # increase for stronger pixelation
         verbose=False
     )
-    
+    print(results[50:300:30])
+        
 if __name__ == "__main__":
     main()
