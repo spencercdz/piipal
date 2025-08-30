@@ -6,8 +6,9 @@ import os
 from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 from moviepy.editor import VideoFileClip
+from backend.scripts.tracker import BoxTracker
 
-model = YOLOE('yoloe-11l-seg.pt')
+model = YOLOE('yoloe-11m-seg.pt')
 
 names = ["traffic sign", 
          "parking sign",
@@ -217,10 +218,10 @@ def run_image_pixelate(
 def _pixelate_frame_with_yoloe(
     model,
     frame_bgr: np.ndarray,
+    tracker: Any,
     imgsz: int = 640,
     conf: float = 0.25,
     verbose: bool = False,
-    padding_px: int = 0,
     pixel_size: int = 12,
 ) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
     """
@@ -233,30 +234,29 @@ def _pixelate_frame_with_yoloe(
     results = model.predict(source=out_img, imgsz=imgsz, conf=conf, verbose=verbose)
     r = results[0]
 
-    dets: List[Dict[str, Any]] = []
+    # Inside your per-frame pipeline, after YOLOE inference:
+    # Build detections list like your dets = [...]
+    detections = []
     if r.boxes is not None and len(r.boxes) > 0:
         xyxy = r.boxes.xyxy.cpu().numpy()
         confs = r.boxes.conf.cpu().numpy()
         clss  = r.boxes.cls.cpu().numpy().astype(int)
-
         for (x1, y1, x2, y2), c, k in zip(xyxy, confs, clss):
-            # no extra filtering; you already constrained classes via set_classes
-            xi1 = max(0, int(np.floor(x1)) - padding_px)
-            yi1 = max(0, int(np.floor(y1)) - padding_px)
-            xi2 = min(W, int(np.ceil(x2))  + padding_px)
-            yi2 = min(H, int(np.ceil(y2))  + padding_px)
-
-            if xi2 - xi1 > 1 and yi2 - yi1 > 1:
-                out_img = apply_pixelation(out_img, xi1, yi1, xi2, yi2, pixel_size=pixel_size)
-
-            dets.append({
+            detections.append({
                 "xyxy": [float(x1), float(y1), float(x2), float(y2)],
                 "conf": float(c),
-                "cls":  int(k),
-                "name": r.names.get(int(k), str(int(k))),  # r.names is dict in your setup
+                "name": r.names.get(int(k), str(int(k)))
             })
 
-    return out_img, dets
+    H, W = out_img.shape[:2]
+    active_tracks = tracker.step(detections, (W, H))
+
+    # Render stabilized censorship:
+    for tr in active_tracks:
+        x1, y1, x2, y2 = tr.smooth_bbox.astype(int)
+        out_img = apply_pixelation(out_img, x1, y1, x2, y2, pixel_size=pixel_size)
+
+    return out_img, detections
 
 def run_video_censor(
     model,
@@ -264,7 +264,6 @@ def run_video_censor(
     out_video_path: str = "/backend/data/HD_car_vid_pixelated_medium.mp4",
     imgsz: int = 640,
     conf: float = 0.25,
-    padding_px: int = 0,
     pixel_size: int = 14,
     verbose: bool = False
 ) -> None:
@@ -274,6 +273,15 @@ def run_video_censor(
     3) For each frame, run YOLOE and pixelate detected regions (no per-frame saves)
     4) Write processed video to /backend/data/HD_car_vid_pixelated.mp4 with original audio
     """
+    tracker = BoxTracker(
+        alpha=0.5,             # 0.3–0.6 typical
+        iou_match_thresh=0.3,  # 0.3–0.5 typical
+        max_age=6,             # keep censor for up to 5 missed frames
+        n_init=0,              # render immediately (you already threshold detections)
+        scale_up=1.1,         # inflate by 15%
+        pad_px=0               # or a few pixels
+    )
+        
     in_path = Path(in_video_path)
     out_path = Path(out_video_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,10 +311,10 @@ def run_video_censor(
         processed_bgr, _ = _pixelate_frame_with_yoloe(
             model,
             frame_bgr,
+            tracker,
             imgsz=imgsz,
             conf=conf,
             verbose=verbose,
-            padding_px=padding_px,
             pixel_size=pixel_size,
         )
 
@@ -351,10 +359,9 @@ def main():
     run_video_censor(
         model,
         in_video_path="./backend/data/HD_car_vid.MP4",
-        out_video_path="./backend/data/HD_car_vid_pixelated.mp4",
+        out_video_path="./backend/data/HD_car_vid_pixelated_stable.mp4",
         imgsz=640,
         conf=0.15,
-        padding_px=2,   # small margin around boxes
         pixel_size=16,  # increase for stronger pixelation
         verbose=False
     )
