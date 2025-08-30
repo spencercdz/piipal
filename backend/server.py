@@ -61,7 +61,7 @@ async def health_check():
 @app.post("/process-video")
 async def process_video_endpoint(
     file: UploadFile = File(...),
-    method: str = "combined",  # "ocr", "yolo", or "combined"
+    method: str = "ocr",  # "ocr", "yolo", or "combined"
     redaction_mode: str = "pixelate",  # "pixelate", "blur", "blackout"
     background_tasks: BackgroundTasks = None
 ):
@@ -114,8 +114,7 @@ async def process_video_endpoint(
                 min_prob=0.2,
                 max_lost=8,
                 iou_thresh=0.3,
-                debug=False,
-                nlp=False
+                debug=False
             )
         else:
             raise HTTPException(status_code=400, detail="Invalid method. Use 'ocr', 'yolo', or 'combined'")
