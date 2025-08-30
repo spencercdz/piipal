@@ -256,14 +256,14 @@ def process_video_consistent(
 
     return output_path
 
-# 7) Usage
-out_vid = process_video_consistent(
-    "data/car_vid.mp4",
-    output_path="data/car_vid_blurred.mp4",
-    pad=0,
-    min_prob=0.1,
-    max_lost=15, iou_thresh=0.2,
-    redaction_mode="pixelate",
-    ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
-    debug=False
-)
+# 7) Usage example (commented out to avoid running on import)
+# out_vid = process_video_consistent(
+#     "data/car_vid.mp4",
+#     output_path="data/car_vid_blurred.mp4",
+#     pad=0,
+#     min_prob=0.1,
+#     max_lost=15, iou_thresh=0.2,
+#     redaction_mode="pixelate",
+#     ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
+#     debug=False
+# )
