@@ -47,16 +47,30 @@ def looks_sensitive(text, nlp=False):
         
         return False
 
-    except Exception as e:
-        print(f'Error in PII model for text "{text}": {e}, falling back to REGEX.')
-        t = text.strip()
-        if not t:
-            return False
-        for pat in PATTERNS.values():
-            if pat.search(t):
-                print(f"REGEX detected: '{text}' as {pat}")
-                return True
+def looks_sensitive(text):
+    """Check if text contains sensitive information using regex patterns"""
+    t = text.strip()
+    if not t:
         return False
+    
+    # Check against all patterns
+    for pattern_name, pattern in PATTERNS.items():
+        if pattern.search(t):
+            print(f"REGEX detected: '{text}' as {pattern_name}")
+            return True
+    
+    # Additional checks for common PII indicators
+    # Check for all caps text (likely names or important info)
+    if t.isupper() and len(t) > 2:
+        print(f"UPPERCASE detected: '{text}'")
+        return True
+    
+    # Check for mixed case with numbers (likely IDs or codes)
+    if any(c.isdigit() for c in t) and any(c.isalpha() for c in t) and len(t) >= 6:
+        print(f"MIXED ALPHANUMERIC detected: '{text}'")
+        return True
+    
+    return False
 
 # 2) Simple IoU
 def compute_iou(a, b):
