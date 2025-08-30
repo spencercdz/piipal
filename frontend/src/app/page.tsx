@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Upload, Video, Image, Download, Loader2, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 import Link from 'next/link';
 
@@ -28,12 +28,29 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [showControls, setShowControls] = useState(false);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Memoize the video URL to prevent recreation on every render
+  const videoUrl = useMemo(() => {
+    return file ? URL.createObjectURL(file) : null;
+  }, [file]);
+
+  // Cleanup video URL when component unmounts or file changes
+  useEffect(() => {
+    return () => {
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+    };
+  }, [videoUrl]);
+
   const API_BASE_URL = 'http://localhost:8000';
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
       setFile(selectedFile);
@@ -56,9 +73,9 @@ export default function Home() {
         setFile(null);
       }
     }
-  };
+  }, []);
 
-  const handleDrop = (event: React.DragEvent) => {
+  const handleDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     setDragActive(false);
     
@@ -83,19 +100,19 @@ export default function Home() {
         setFile(null);
       }
     }
-  };
+  }, []);
 
-  const handleDragOver = (event: React.DragEvent) => {
+  const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     setDragActive(true);
-  };
+  }, []);
 
-  const handleDragLeave = (event: React.DragEvent) => {
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     setDragActive(false);
-  };
+  }, []);
 
-  const processFile = async () => {
+  const processFile = useCallback(async () => {
     if (!file) return;
 
     setIsProcessing(true);
@@ -137,9 +154,9 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [file, fileType, method, redactionMode]);
 
-  const fetchProcessedFiles = async () => {
+  const fetchProcessedFiles = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/files`);
       if (response.ok) {
@@ -149,9 +166,9 @@ export default function Home() {
     } catch (error) {
       console.error('Failed to fetch processed files:', error);
     }
-  };
+  }, []);
 
-  const downloadFile = async (filename: string) => {
+  const downloadFile = useCallback(async (filename: string) => {
     try {
       const response = await fetch(`${API_BASE_URL}/download/${filename}`);
       if (response.ok) {
@@ -168,9 +185,9 @@ export default function Home() {
     } catch (err) {
       setError('Failed to download file');
     }
-  };
+  }, []);
 
-  const togglePlayPause = () => {
+  const togglePlayPause = useCallback(() => {
     if (fileType === 'video' && videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
@@ -179,14 +196,80 @@ export default function Home() {
       }
       setIsPlaying(!isPlaying);
     }
-  };
+  }, [fileType, isPlaying]);
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     if (fileType === 'video' && videoRef.current) {
       videoRef.current.muted = !isMuted;
       setIsMuted(!isMuted);
     }
-  };
+  }, [fileType, isMuted]);
+
+  const handleProgressBarClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!videoRef.current) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickPercentage = clickX / rect.width;
+    const videoDuration = videoRef.current.duration;
+    const seekTime = clickPercentage * videoDuration;
+
+    videoRef.current.currentTime = seekTime;
+    setCurrentTime(seekTime);
+  }, []);
+
+  const formatTime = useCallback((seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  }, []);
+
+  const handleVideoMouseEnter = useCallback(() => {
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    setShowControls(true);
+  }, []);
+
+  const handleVideoMouseLeave = useCallback(() => {
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 0); // Instant hide when leaving video
+  }, []);
+
+  // Update current time for progress bar with more frequent updates
+  useEffect(() => {
+    if (videoRef.current && fileType === 'video') {
+      const handleTimeUpdate = () => {
+        if (videoRef.current) {
+          setCurrentTime(videoRef.current.currentTime);
+        }
+      };
+      
+      // Add timeupdate event listener
+      videoRef.current.addEventListener('timeupdate', handleTimeUpdate);
+      
+      // Also add a more frequent update interval for smoother progress bar
+      const interval = setInterval(() => {
+        if (videoRef.current) {
+          setCurrentTime(videoRef.current.currentTime);
+        }
+      }, 50); // Update every 50ms for very smooth progress bar
+      
+      return () => {
+        if (videoRef.current) {
+          videoRef.current.removeEventListener('timeupdate', handleTimeUpdate);
+        }
+        clearInterval(interval);
+      };
+    }
+  }, [fileType, file]); // Add file dependency to ensure proper cleanup and re-initialization
+
+  // Reset current time when file changes
+  useEffect(() => {
+    setCurrentTime(0);
+  }, [file]);
 
   // Auto-restart video when it ends (infinite loop like reels)
   useEffect(() => {
@@ -207,10 +290,101 @@ export default function Home() {
     }
   }, [fileType]);
 
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Fetch processed files on component mount
   useEffect(() => {
     fetchProcessedFiles();
-  }, []);
+  }, [fetchProcessedFiles]);
+
+  // Memoized video component to prevent unnecessary re-renders
+  const VideoPlayer = useMemo(() => {
+    if (!file || fileType !== 'video') return null;
+    
+    return (
+      <>
+        <video
+          key={videoUrl}
+          ref={videoRef}
+          src={videoUrl || undefined}
+          className="w-full h-auto max-h-[40vh] max-w-full object-contain"
+          autoPlay
+          loop
+          muted={isMuted}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onTimeUpdate={() => {
+            if (videoRef.current) {
+              setCurrentTime(videoRef.current.currentTime);
+            }
+          }}
+        />
+        
+        {/* Close Button - Top Right of Video */}
+        <button
+          onClick={() => setFile(null)}
+          className="absolute top-3 right-3 text-white hover:text-[hsl(var(--tiktok-red))] hover:bg-black/50 bg-black/30 p-2 rounded-full transition-all duration-200 hover-lift z-10"
+          title="Close preview and return to upload"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </>
+    );
+  }, [file, fileType, videoUrl, isMuted, isPlaying]); // Add necessary dependencies
+
+  // Separate VideoControls component that can update independently
+  const VideoControls = useMemo(() => {
+    if (!file || fileType !== 'video') return null;
+    
+    return (
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+        <div className={`transition-all duration-0 ease-in-out ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
+          {/* Progress Bar */}
+          <div className="mb-3">
+            <div className="relative w-full h-2 bg-black/50 rounded-full cursor-pointer" onClick={handleProgressBarClick}>
+              <div 
+                className="absolute top-0 left-0 h-full bg-[hsl(var(--tiktok-red))] rounded-full transition-all duration-75"
+                style={{ width: `${Math.min((currentTime / (videoRef.current?.duration || 1)) * 100, 100)}%` }}
+              ></div>
+              <div 
+                className="absolute top-0 h-full w-2 bg-[hsl(var(--tiktok-red))] rounded-full transform -translate-x-1/2 transition-all duration-75"
+                style={{ left: `${Math.min((currentTime / (videoRef.current?.duration || 1)) * 100, 100)}%` }}
+              ></div>
+            </div>
+            <div className="flex justify-between text-white text-xs mt-1">
+              <span>{formatTime(currentTime)}</span>
+              <span>{formatTime(videoRef.current?.duration || 0)}</span>
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <button
+              onClick={togglePlayPause}
+              className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white p-2.5 rounded-full transition-all duration-200 hover-lift"
+            >
+              {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+            </button>
+            
+            <button
+              onClick={toggleMute}
+              className="text-white hover:text-[hsl(var(--tiktok-red))] transition-all duration-200 p-2.5 rounded-full hover:bg-black/30"
+            >
+              {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }, [file, fileType, showControls, currentTime, isPlaying, isMuted, handleProgressBarClick, formatTime, togglePlayPause, toggleMute]);
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] text-white flex">
@@ -243,7 +417,7 @@ export default function Home() {
 
         {/* Navigation Links */}
         <nav className="space-y-2">
-          <Link href="/" className="flex items-center space-x-3 p-3 rounded-lg bg-[hsl(var(--tiktok-red))]/10 text-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/20 transition-all duration-200 hover-lift">
+          <Link href="/" className="flex items-center space-x-3 p-3 rounded-lg bg-[hsl(var(--tiktok-red))]/10 text-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/20 transition-all duration-200 hover-lift" onClick={() => setFile(null)}>
             <HomeIcon className="h-5 w-5" />
             <span>Home</span>
           </Link>
@@ -265,7 +439,7 @@ export default function Home() {
       {/* Main Content Area - Full Screen Upload */}
       <div className="flex-1 ml-64 flex flex-col">
         {/* Top Bar */}
-        <div className="flex justify-between items-center p-8 pb-4">
+        <div className="flex justify-between items-center p-8 pb-6">
           <div>
             <h1 className="text-3xl font-bold text-white mb-2">
               <span className="gradient-text">Reels Moderation</span>
@@ -284,7 +458,7 @@ export default function Home() {
               DevPost
             </a>
             <a 
-              href="https://github.com/spencercdz/techjam_catgpt_2025" 
+              href="https://github.com" 
               target="_blank" 
               rel="noopener noreferrer"
               className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"
@@ -301,7 +475,7 @@ export default function Home() {
         </div>
 
         {/* Main Upload Area - Takes Full Remaining Space */}
-        <div className="flex-1 p-6 pt-0">
+        <div className="flex-1 px-8 pb-6">
           {/* Upload Content - Full Width */}
           {!file ? (
             <div className="w-full">
@@ -361,50 +535,36 @@ export default function Home() {
             <div className="w-full space-y-4">
               {/* File Preview */}
               <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
-                <h2 className="text-xl font-semibold mb-3 text-white text-center">
+                <h2 className="text-lg font-semibold mb-3 text-white text-center">
                   <span className="gradient-text">File Preview</span>
                 </h2>
                 
-                <div className="max-w-2xl mx-auto">
-                  <div className="relative aspect-video bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden mb-3">
+                <div className="max-w-3xl mx-auto">
+                  <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden mb-3" onMouseEnter={handleVideoMouseEnter} onMouseLeave={handleVideoMouseLeave}>
                     {fileType === 'video' ? (
                       <>
-                        <video
-                          ref={videoRef}
-                          src={URL.createObjectURL(file)}
-                          className="w-full h-full object-cover"
-                          autoPlay
-                          loop
-                          muted={isMuted}
-                          onPlay={() => setIsPlaying(true)}
-                          onPause={() => setIsPlaying(false)}
-                        />
-                        
-                        {/* Video Controls Overlay */}
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-                          <div className="flex items-center justify-between">
-                            <button
-                              onClick={togglePlayPause}
-                              className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white p-2 rounded-full transition-all duration-200 hover-lift"
-                            >
-                              {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                            </button>
-                            
-                            <button
-                              onClick={toggleMute}
-                              className="text-white hover:text-[hsl(var(--tiktok-red))] transition-all duration-200"
-                            >
-                              {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                            </button>
-                          </div>
-                        </div>
+                        {VideoPlayer}
+                        {VideoControls}
                       </>
                     ) : (
-                      <img
-                        src={URL.createObjectURL(file)}
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                      />
+                      <>
+                        <img
+                          src={URL.createObjectURL(file)}
+                          alt="Preview"
+                          className="w-full h-auto max-h-[40vh] max-w-full object-contain"
+                        />
+                        
+                        {/* Close Button - Top Right of Image */}
+                        <button
+                          onClick={() => setFile(null)}
+                          className="absolute top-3 right-3 text-white hover:text-[hsl(var(--tiktok-red))] hover:bg-black/50 bg-black/30 p-2 rounded-full transition-all duration-200 hover-lift z-10"
+                          title="Close preview and return to upload"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </>
                     )}
                   </div>
                   
@@ -423,7 +583,7 @@ export default function Home() {
                 </h3>
                 
                 <div className="max-w-2xl mx-auto">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">
                         Detection Method
@@ -431,7 +591,7 @@ export default function Home() {
                       <select
                         value={method}
                         onChange={(e) => setMethod(e.target.value)}
-                        className="w-full px-3 py-2 bg-[hsl(var(--interaction-bg))] border border-[hsl(var(--border-color))] rounded-lg text-white focus:outline-none focus:border-[hsl(var(--tiktok-red))] focus:ring-1 focus:ring-[hsl(var(--tiktok-red))] transition-all duration-200 hover:bg-[hsl(var(--hover-bg))]"
+                        className="w-full px-4 py-3 bg-[hsl(var(--interaction-bg))] border border-[hsl(var(--border-color))] rounded-lg text-white focus:outline-none focus:border-[hsl(var(--tiktok-red))] focus:ring-1 focus:ring-[hsl(var(--tiktok-red))] transition-all duration-200 hover:bg-[hsl(var(--hover-bg))]"
                       >
                         {fileType === 'video' ? (
                           <>
@@ -453,7 +613,7 @@ export default function Home() {
                         <select
                           value={redactionMode}
                           onChange={(e) => setRedactionMode(e.target.value)}
-                          className="w-full px-3 py-2 bg-[hsl(var(--interaction-bg))] border border-[hsl(var(--border-color))] rounded-lg text-white focus:outline-none focus:border-[hsl(var(--tiktok-red))] focus:ring-1 focus:ring-[hsl(var(--tiktok-red))] transition-all duration-200 hover:bg-[hsl(var(--hover-bg))]"
+                          className="w-full px-4 py-3 bg-[hsl(var(--interaction-bg))] border border-[hsl(var(--border-color))] rounded-lg text-white focus:outline-none focus:border-[hsl(var(--tiktok-red))] focus:ring-1 focus:ring-[hsl(var(--border-color))] transition-all duration-200 hover:bg-[hsl(var(--hover-bg))]"
                         >
                           <option value="pixelate">Pixelate</option>
                           <option value="blur">Blur</option>
@@ -463,11 +623,11 @@ export default function Home() {
                     )}
                   </div>
 
-                  <div className="text-center mt-4">
+                  <div className="text-center">
                     <button
                       onClick={processFile}
                       disabled={isProcessing}
-                      className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 disabled:bg-gray-600 text-white py-3 px-6 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-3 disabled:cursor-not-allowed hover-lift hover-glow mx-auto"
+                      className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 disabled:bg-gray-600 text-white py-3 px-8 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-3 disabled:cursor-not-allowed hover-lift hover-glow mx-auto"
                     >
                       {isProcessing ? (
                         <>
@@ -542,7 +702,7 @@ export default function Home() {
                     </div>
                     
                     {processedFiles.length > 6 && (
-                      <div className="mt-4 text-center">
+                      <div className="mt-3 text-center">
                         <Link 
                           href="/explore" 
                           className="text-[hsl(var(--tiktok-red))] hover:text-[hsl(var(--tiktok-red))]/80 font-medium transition-all duration-200 hover:underline text-sm"
