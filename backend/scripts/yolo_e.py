@@ -223,7 +223,7 @@ def _pixelate_frame_with_yoloe(
     conf: float = 0.25,
     verbose: bool = False,
     pixel_size: int = 12,
-) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+) -> Tuple[np.ndarray, Dict[str, List[Tuple[int, int, int, int]]]]:
     """
     Frame-level variant: runs YOLOE on a BGR frame and pixelates every detected region.
     Detection set is already constrained by model.set_classes(...).
@@ -250,13 +250,18 @@ def _pixelate_frame_with_yoloe(
 
     H, W = out_img.shape[:2]
     active_tracks = tracker.step(detections, (W, H))
+    
+    active_bbox_dict = {}
 
     # Render stabilized censorship:
     for tr in active_tracks:
         x1, y1, x2, y2 = tr.smooth_bbox.astype(int)
-        out_img = apply_pixelation(out_img, x1, y1, x2, y2, pixel_size=pixel_size)
+        tr_class = tr.cls_name
+        if tr_class not in active_bbox_dict:
+            active_bbox_dict[tr_class] = []
+        active_bbox_dict[tr_class].append((x1, y1, x2, y2))
 
-    return out_img, detections
+    return out_img, active_bbox_dict
 
 def run_video_censor(
     model,
@@ -345,6 +350,59 @@ def run_video_censor(
     except Exception:
         pass
 
+def run_video_censor_send_bboxes(
+    model,
+    in_video_path: str = "/backend/data/HD_car_vid.mp4",
+    imgsz: int = 640,
+    conf: float = 0.25,
+    pixel_size: int = 14,
+    verbose: bool = False
+) -> List[Dict[str, List[Tuple[int, int, int, int]]]]:
+    """
+    1) Read MP4 from /backend/data/HD_car_vid.mp4 (by default)
+    2) Extract original audio
+    3) For each frame, run YOLOE and pixelate detected regions (no per-frame saves)
+    4) Write processed video to /backend/data/HD_car_vid_pixelated.mp4 with original audio
+    """
+    tracker = BoxTracker(
+        alpha=0.5,             # 0.3–0.6 typical
+        iou_match_thresh=0.3,  # 0.3–0.5 typical
+        max_age=6,             # keep censor for up to 5 missed frames
+        n_init=0,              # render immediately (you already threshold detections)
+        scale_up=1.1,         # inflate by 15%
+        pad_px=0               # or a few pixels
+    )
+    active_detection_dict_list = []
+        
+    in_path = Path(in_video_path)
+
+    clip = VideoFileClip(str(in_path))
+    fps = clip.fps
+    width, height = clip.size  # (w, h)
+
+    # Iterate frames in RGB from moviepy, convert to BGR for OpenCV and model
+    frame_num = int(clip.duration * fps)
+    frame_count = 0
+    print(f"Processing {frame_num} frames at {fps} FPS, resolution {width}x{height}")
+    for frame_rgb in clip.iter_frames(fps=fps, dtype="uint8"):
+        frame_count += 1
+        if frame_count % 50 == 0 or frame_count == frame_num:
+            print(f"  Processing frame {frame_count}/{frame_num}...")
+        frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+
+        _, active_detection_dict = _pixelate_frame_with_yoloe(
+            model,
+            frame_bgr,
+            tracker,
+            imgsz=imgsz,
+            conf=conf,
+            verbose=verbose,
+            pixel_size=pixel_size,
+        )
+        active_detection_dict_list.append(active_detection_dict)
+        
+    return active_detection_dict_list
+        
 def main():
     # frame_paths, outdir = get_candidate_frame_paths(isHD=True)
     # for path in frame_paths:
