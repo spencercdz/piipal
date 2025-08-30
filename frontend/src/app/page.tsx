@@ -462,7 +462,7 @@ export default function Home() {
             <img src="/favicon.ico" alt="PII Pal" className="w-8 h-8" />
             <div>
               <h2 className="text-xl font-bold text-white group-hover:text-[hsl(var(--tiktok-red))] transition-all duration-200">
-                PII Pal
+                <span className="gradient-text">PII</span>Pal
               </h2>
               <p className="text-sm text-gray-400">AI Reels Moderation Tool</p>
             </div>
@@ -475,7 +475,7 @@ export default function Home() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search processed files..."
+              placeholder="Search"
               className="w-full bg-[hsl(var(--interaction-bg))] border border-[hsl(var(--border-color))] rounded-lg pl-10 pr-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-[hsl(var(--tiktok-red))] focus:ring-1 focus:ring-[hsl(var(--tiktok-red))] transition-all duration-200"
             />
           </div>
@@ -525,7 +525,7 @@ export default function Home() {
                 DevPost
               </a>
               <a 
-                href="https://github.com" 
+                href="https://github.com/spencercdz/techjam_catgpt_2025" 
                 target="_blank" 
                 rel="noopener noreferrer"
                 className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"

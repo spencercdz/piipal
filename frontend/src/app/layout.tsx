@@ -13,9 +13,9 @@ const tiktokMono = TikTok_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "PII Censor - TikTok Content Safety",
-  description: "Automatically detect and blur sensitive information in your TikTok content with AI-powered PII detection.",
-  keywords: "PII detection, content safety, TikTok, privacy, blur, censor",
+  title: "PIIPal - AI Content Privacy",
+  description: "Safeguard your content with AI-powered PII detection.",
+  keywords: "PII detection, content safety, Reels, privacy, blur, censor",
 };
 
 export default function RootLayout({
