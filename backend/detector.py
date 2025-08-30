@@ -3,7 +3,6 @@ import numpy as np
 import easyocr
 import re
 import torch
-from transformers import AutoTokenizer, AutoModelForTokenClassification
 
 # Load OCR model
 print("Loading EasyOCR model...")
