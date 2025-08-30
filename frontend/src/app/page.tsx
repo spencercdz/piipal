@@ -1,26 +1,31 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Upload, Video, Image, Download, Loader2, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2 } from 'lucide-react';
+import { Upload, Download, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 
-interface ProcessingResult {
-  message: string;
-  output_file: string;
-  download_url: string;
-}
+// API configuration
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// Type definitions
 interface FileInfo {
   filename: string;
   size: number;
   download_url: string;
 }
 
+interface ProcessingResult {
+  message: string;
+  output_file: string;
+  download_url: string;
+  file_type: string;
+}
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileType, setFileType] = useState<'video' | 'image'>('video');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ProcessingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [processedFiles, setProcessedFiles] = useState<FileInfo[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -49,7 +54,14 @@ export default function Home() {
     };
   }, [videoUrl]);
 
-  const API_BASE_URL = 'http://localhost:8000';
+  // Cleanup controls timeout when component unmounts
+  useEffect(() => {
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -149,7 +161,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/files`);
       if (response.ok) {
-        const data = await response.json();
+        const data: { files: FileInfo[] } = await response.json();
         
         // Merge with existing localStorage data to maintain persistence
         const existingFiles = localStorage.getItem('recentFiles');
@@ -162,23 +174,23 @@ export default function Home() {
               index === self.findIndex(f => f.filename === file.filename)
             );
             setProcessedFiles(uniqueFiles);
-          } catch (error) {
+          } catch {
             setProcessedFiles(data.files);
           }
         } else {
           setProcessedFiles(data.files);
         }
       }
-    } catch (error) {
-      console.error('Failed to fetch processed files:', error);
+    } catch (fetchError) {
+      console.error('Failed to fetch processed files:', fetchError);
       // Fallback to localStorage if backend is unavailable
       const savedFiles = localStorage.getItem('recentFiles');
       if (savedFiles) {
         try {
           const parsedFiles = JSON.parse(savedFiles);
           setProcessedFiles(parsedFiles);
-        } catch (error) {
-          console.error('Error loading saved files:', error);
+        } catch {
+          console.error('Error loading saved files');
         }
       }
     }
@@ -213,7 +225,7 @@ export default function Home() {
         throw new Error(errorData.detail || 'Failed to process file');
       }
 
-      const resultData = await response.json();
+      const resultData: ProcessingResult = await response.json();
       setResult(resultData);
       
       // Add to recent files
@@ -227,8 +239,8 @@ export default function Home() {
       // Refresh the list of processed files from backend
       fetchProcessedFiles();
       
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+    } catch {
+      setError('Failed to process file');
     } finally {
       setIsProcessing(false);
     }
@@ -248,7 +260,7 @@ export default function Home() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       }
-    } catch (err) {
+    } catch {
       setError('Failed to download file');
     }
   }, []);
@@ -343,15 +355,6 @@ export default function Home() {
     }
   }, [fileType]);
 
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-    };
-  }, []);
-
   // Fetch processed files on component mount and load from localStorage
   useEffect(() => {
     fetchProcessedFiles();
@@ -396,7 +399,7 @@ export default function Home() {
         onClick={togglePlayPause}
       />
     </div>
-  ), [file, fileType, videoUrl, isMuted, isPlaying, handleVideoMouseEnter, handleVideoMouseLeave, togglePlayPause]);
+  ), [videoUrl, isMuted, handleVideoMouseEnter, handleVideoMouseLeave, togglePlayPause]);
 
   // Separate VideoControls component that can update independently
   const VideoControls = useMemo(() => {
@@ -609,8 +612,9 @@ export default function Home() {
                       <>
                         <img
                           src={URL.createObjectURL(file)}
-                          alt="Preview"
+                          alt="File preview"
                           className="w-full h-auto max-h-[40vh] max-w-full object-contain"
+                          loading="lazy"
                         />
                         {/* Close Button - Top Right of Image */}
                         <button
@@ -701,8 +705,9 @@ export default function Home() {
                           ) : (
                             <img
                               src={file ? URL.createObjectURL(file) : undefined}
-                              alt="Original"
+                              alt="Original file preview"
                               className="w-full h-auto max-h-[40vh] max-w-full object-contain"
+                              loading="lazy"
                             />
                           )}
                         </div>
@@ -747,8 +752,9 @@ export default function Home() {
                           ) : (
                             <img
                               src={`${API_BASE_URL}/download/${result.output_file}`}
-                              alt="Censored"
+                              alt="Censored file preview"
                               className="w-full h-auto max-h-[40vh] max-w-full object-contain"
+                              loading="lazy"
                             />
                           )}
                         </div>
@@ -838,7 +844,7 @@ export default function Home() {
                           ) : isImage ? (
                             <img
                               src={`${API_BASE_URL}/download/${fileInfo.filename}`}
-                              alt="File Preview"
+                              alt={`Preview of ${fileInfo.filename}`}
                               className="w-full h-full object-cover"
                               loading="lazy"
                             />
@@ -938,7 +944,7 @@ export default function Home() {
                       ) : (
                         <img
                           src={`${API_BASE_URL}/download/${selectedCensoredFile}`}
-                          alt="File Preview"
+                          alt={`Full preview of ${selectedCensoredFile}`}
                           className="w-full h-auto max-h-[50vh] max-w-full object-contain"
                           loading="lazy"
                         />
