@@ -15,12 +15,8 @@ PATTERNS = {
     "email":       re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     "phone":       re.compile(r"(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{1,4}\)?[-.\s]?){1,4}\d{1,4}"),
     "alphanum":    re.compile(r"(?=\w*\d)(?=\w*[A-Za-z])[A-Za-z0-9]{3,}"),
-    "numeric":     re.compile(r"\b\d{4,}\b"),
-    "ssn":         re.compile(r"\d{3}-\d{2}-\d{4}"),
-    "date":        re.compile(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}"),
-    "address":     re.compile(r"\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr)"),
+    "numeric":     re.compile(r"\b\d{4,}\b")
 }
-<<<<<<< HEAD
 def looks_sensitive(text, nlp=False):
     if nlp:
         # Default to all non-O labels for now
@@ -56,6 +52,8 @@ def looks_sensitive(text, nlp=False):
             if pat.search(t):
                 print(f"REGEX detected: '{text}' as {pat}")
                 return True
+        return False
+
 # 2) Simple IoU
 def compute_iou(a, b):
     xA = max(a[0], b[0]); yA = max(a[1], b[1])
