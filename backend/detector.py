@@ -3,6 +3,7 @@ import numpy as np
 import easyocr
 import re
 import torch
+from transformers import AutoTokenizer, AutoModelForTokenClassification
 
 # Load OCR model
 print("Loading EasyOCR model...")
@@ -254,20 +255,6 @@ def process_video_consistent(
 
     return output_path
 
-<<<<<<< HEAD
-# 7) Usage
-out_vid = process_video_consistent(
-    "data/test2.mp4",
-    output_path="data/test2_blurred.mp4",
-    pad=0,
-    min_prob=0.1,
-    max_lost=15, iou_thresh=0.2,
-    redaction_mode="pixelate",
-    ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
-    debug=False,
-    nlp=False
-)
-=======
 # 7) Usage example (commented out to avoid running on import)
 # out_vid = process_video_consistent(
 #     "data/car_vid.mp4",
@@ -279,4 +266,3 @@ out_vid = process_video_consistent(
 #     ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
 #     debug=False
 # )
->>>>>>> 29c3d4c (simple frontend for testing)
