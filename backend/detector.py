@@ -20,43 +20,31 @@ PATTERNS = {
     "date":        re.compile(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}"),
     "address":     re.compile(r"\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr)"),
 }
-def looks_sensitive(text, nlp=False):
-    if nlp:
-        # Default to all non-O labels for now
-        sensitive_labels = set(model.config.id2label.values()) - {'O'}
-        
-        # Tokenize input text
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
-        # Get the model predictions
-        with torch.no_grad():
-            outputs = model(**inputs)
-        
-        # Get the predicted labels
-        predictions = torch.argmax(outputs.logits, dim=-1)
-        
-        # Check if any specified sensitive labels exist
-        for prediction in predictions[0]:
-            label_id = prediction.item()
-            if label_id != model.config.label2id['O']:
-                label_name = model.config.id2label[label_id]
-                if label_name in sensitive_labels:
-                    print(f"PII NLP Model detected '{text}' as {label_name}")
-                    return True
-        
-        return False
 
-    except Exception as e:
-        print(f'Error in PII model for text "{text}": {e}, falling back to REGEX.')
-        t = text.strip()
-        if not t:
-            return False
-        for pat in PATTERNS.values():
-            if pat.search(t):
-                print(f"REGEX detected: '{text}' as {pat}")
-                return True
+def looks_sensitive(text):
+    """Check if text contains sensitive information using regex patterns"""
+    t = text.strip()
+    if not t:
         return False
+    
+    # Check against all patterns
+    for pattern_name, pattern in PATTERNS.items():
+        if pattern.search(t):
+            print(f"REGEX detected: '{text}' as {pattern_name}")
+            return True
+    
+    # Additional checks for common PII indicators
+    # Check for all caps text (likely names or important info)
+    if t.isupper() and len(t) > 2:
+        print(f"UPPERCASE detected: '{text}'")
+        return True
+    
+    # Check for mixed case with numbers (likely IDs or codes)
+    if any(c.isdigit() for c in t) and any(c.isalpha() for c in t) and len(t) >= 6:
+        print(f"MIXED ALPHANUMERIC detected: '{text}'")
+        return True
+    
+    return False
 
 # 2) Simple IoU
 def compute_iou(a, b):
