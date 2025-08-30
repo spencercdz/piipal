@@ -88,7 +88,6 @@ class PiiTracker:
         """
         detections: list of ((x,y,w,h), text)
         """
-        print(f"Tracker update: {len(detections)} new detections, {len(self.tracks)} existing tracks")
         new_tracks = {}
         used = set()
 
@@ -101,7 +100,6 @@ class PiiTracker:
                     best_id, best_iou = tid, iou
             if best_iou >= self.iou_thresh:
                 # update existing track
-                print(f"Matched detection '{det_text}' to track {best_id} (IoU: {best_iou:.3f})")
                 new_tracks[best_id] = {
                     'bbox': det_bbox,
                     'text': det_text,
@@ -110,7 +108,6 @@ class PiiTracker:
                 used.add(best_id)
             else:
                 # start a fresh track
-                print(f"New track {self.next_id} for '{det_text}' at {det_bbox}")
                 new_tracks[self.next_id] = {
                     'bbox': det_bbox,
                     'text': det_text,
@@ -126,9 +123,6 @@ class PiiTracker:
                     new_tracks[tid] = data
 
         self.tracks = new_tracks
-
-        print(f"Tracker summary: {new_tracks} new")
-        print(f"Active tracks: {len(self.tracks)}")
 
     def active(self):
         """Return list of (bbox, text) for current tracks."""
