@@ -29,8 +29,8 @@ PATTERNS = {
     "alphanum":    re.compile(r"(?=\w*\d)(?=\w*[A-Za-z])[A-Za-z0-9]{3,}"),
     "numeric":     re.compile(r"\b\d{4,}\b")
 }
-def looks_sensitive(text):
-    try:
+def looks_sensitive(text, nlp=False):
+    if nlp:
         # Default to all non-O labels for now
         sensitive_labels = set(model.config.id2label.values()) - {'O'}
         
@@ -51,13 +51,12 @@ def looks_sensitive(text):
             if label_id != model.config.label2id['O']:
                 label_name = model.config.id2label[label_id]
                 if label_name in sensitive_labels:
-                    print(f"PII Model detected '{text}' as {label_name}")
+                    print(f"PII NLP Model detected '{text}' as {label_name}")
                     return True
         
         return False
 
-    except Exception as e:
-        print(f'Error in PII model for text "{text}": {e}, falling back to REGEX.')
+    else:
         t = text.strip()
         if not t:
             return False
@@ -147,7 +146,8 @@ def censor_frame_consistent(
     redaction_mode="pixelate",
     blur_ksize=(51,51),
     ocr_params={"text_threshold": 0.5, "low_text": 0.6, "add_margin": 0.2, "contrast_ths": 0.1, "adjust_contrast": 0.5},
-    debug=False
+    debug=False,
+    nlp=False
 ):
     """
     1) OCR→detect sensitive bboxes
@@ -167,7 +167,7 @@ def censor_frame_consistent(
     for bbox_pts, text, prob in results:
         if prob < min_prob:
             continue
-        if not looks_sensitive(text):
+        if not looks_sensitive(text, nlp):
             continue
 
         pts = np.array(bbox_pts).astype(int)
@@ -207,7 +207,7 @@ def censor_frame_consistent(
           x2, y2 = pts[:,0].max(), pts[:,1].max()
           x = max(0, x1-pad); y = max(0, y1-pad)
           w = min(W, x2+pad) - x;  h = min(H, y2+pad) - y
-          sus = looks_sensitive(text)
+          sus = looks_sensitive(text, nlp)
           cv2.polylines(out, [pts], isClosed=True, color=(0,0,255) if sus else (0,255,0), thickness=2)
           cv2.putText(out, text, (x1, max(15,y1-5)),
                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255) if sus else (0,255,0), 1)
@@ -222,7 +222,8 @@ def process_video_consistent(
     max_lost=8, iou_thresh=0.3,
     redaction_mode="blackout",
     ocr_params={"text_threshold": 0.5, "low_text": 0.6, "add_margin": 0.2, "contrast_ths": 0.1, "adjust_contrast": 0.5},
-    debug=False
+    debug=False,
+    nlp=False
 ):
     print(f"Starting video processing...")
     print(f"Tracker: max_lost={max_lost}, iou_thresh={iou_thresh}")
@@ -250,7 +251,8 @@ def process_video_consistent(
             redaction_mode=redaction_mode,
             blur_ksize=(51,51),
             ocr_params=ocr_params,
-            debug=debug
+            debug=debug,
+            nlp=nlp
         )
         writer.write(out)
     
@@ -264,12 +266,13 @@ def process_video_consistent(
 
 # 7) Usage
 out_vid = process_video_consistent(
-    "data/car_vid.mp4",
-    output_path="data/car_vid_blurred.mp4",
+    "data/test2.mp4",
+    output_path="data/test2_blurred.mp4",
     pad=0,
     min_prob=0.1,
     max_lost=15, iou_thresh=0.2,
     redaction_mode="pixelate",
     ocr_params={"text_threshold": 0.3, "low_text": 0.6, "add_margin": 0.2, "contrast_ths":0.1, "adjust_contrast":0.5},
-    debug=False
+    debug=False,
+    nlp=False
 )
