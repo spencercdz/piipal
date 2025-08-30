@@ -25,7 +25,7 @@ app = FastAPI(title="PII Censor API", description="API for censoring PII in vide
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=["http://localhost:3000", "https://piipal.vercel.app"],  # In production, specify your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

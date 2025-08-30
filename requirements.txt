@@ -7,3 +7,6 @@ torchvision>=0.15.0
 clip>=0.15.0
 easyocr
 transformers
+fastapi
+uvicorn
+python-multipart
