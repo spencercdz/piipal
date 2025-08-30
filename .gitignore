@@ -169,3 +169,6 @@ logs/
 .env.local
 .env.production
 config/local.json
+
+# Large model files
+backend/mobileclip_blt.ts

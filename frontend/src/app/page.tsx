@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Upload, Video, Image, Download, Loader2, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX } from 'lucide-react';
+import { Upload, Video, Image, Download, Loader2, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 
 interface ProcessingResult {
@@ -19,20 +19,21 @@ interface FileInfo {
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileType, setFileType] = useState<'video' | 'image'>('video');
-  const [method, setMethod] = useState<string>('ocr');
-  const [redactionMode, setRedactionMode] = useState<string>('pixelate');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [result, setResult] = useState<ProcessingResult | null>(null);
+  const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [processedFiles, setProcessedFiles] = useState<FileInfo[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [showControls, setShowControls] = useState(false);
+  const [selectedCensoredFile, setSelectedCensoredFile] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const originalVideoRef = useRef<HTMLVideoElement>(null);
+  const censoredVideoRef = useRef<HTMLVideoElement>(null);
 
   // Memoize the video URL to prevent recreation on every render
   const videoUrl = useMemo(() => {
@@ -63,11 +64,9 @@ export default function Home() {
       
       if (isVideo) {
         setFileType('video');
-        setMethod('ocr'); // Default for videos
         setIsPlaying(true); // Auto-play videos
       } else if (isImage) {
         setFileType('image');
-        setMethod('yolo'); // Default for images
       } else {
         setError('Please select a valid video or image file');
         setFile(null);
@@ -75,11 +74,21 @@ export default function Home() {
     }
   }, []);
 
-  const handleDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
     setDragActive(false);
     
-    const droppedFile = event.dataTransfer.files[0];
+    const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
       setFile(droppedFile);
       setError(null);
@@ -90,11 +99,8 @@ export default function Home() {
       
       if (isVideo) {
         setFileType('video');
-        setMethod('ocr');
-        setIsPlaying(true); // Auto-play videos
       } else if (isImage) {
         setFileType('image');
-        setMethod('yolo');
       } else {
         setError('Please select a valid video or image file');
         setFile(null);
@@ -102,14 +108,87 @@ export default function Home() {
     }
   }, []);
 
-  const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setDragActive(true);
+  const handleVideoMouseEnter = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
   }, []);
 
-  const handleDragLeave = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setDragActive(false);
+  const handleVideoMouseLeave = useCallback(() => {
+    // Only hide controls if mouse leaves the entire video container area
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 0);
+  }, []);
+
+  const handleControlsMouseEnter = useCallback(() => {
+    // Keep controls visible when hovering over controls
+    setShowControls(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
+  }, []);
+
+  const handleControlsMouseLeave = useCallback(() => {
+    // Only hide controls when leaving the entire video area
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 0);
+  }, []);
+
+  const fetchProcessedFiles = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/files`);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Merge with existing localStorage data to maintain persistence
+        const existingFiles = localStorage.getItem('recentFiles');
+        if (existingFiles) {
+          try {
+            const parsedExisting = JSON.parse(existingFiles);
+            const mergedFiles = [...parsedExisting, ...data.files];
+            // Remove duplicates based on filename
+            const uniqueFiles = mergedFiles.filter((file, index, self) => 
+              index === self.findIndex(f => f.filename === file.filename)
+            );
+            setProcessedFiles(uniqueFiles);
+          } catch (error) {
+            setProcessedFiles(data.files);
+          }
+        } else {
+          setProcessedFiles(data.files);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch processed files:', error);
+      // Fallback to localStorage if backend is unavailable
+      const savedFiles = localStorage.getItem('recentFiles');
+      if (savedFiles) {
+        try {
+          const parsedFiles = JSON.parse(savedFiles);
+          setProcessedFiles(parsedFiles);
+        } catch (error) {
+          console.error('Error loading saved files:', error);
+        }
+      }
+    }
+  }, []);
+
+  const addToRecentFiles = useCallback((newFile: FileInfo) => {
+    setProcessedFiles(prev => {
+      const updated = [newFile, ...prev.filter(f => f.filename !== newFile.filename)];
+      return updated.slice(0, 20); // Keep only last 20 files
+    });
   }, []);
 
   const processFile = useCallback(async () => {
@@ -123,17 +202,8 @@ export default function Home() {
     formData.append('file', file);
 
     try {
-      const endpoint = fileType === 'video' ? '/process-video' : '/process-image';
-      const params = new URLSearchParams();
-      
-      if (fileType === 'video') {
-        params.append('method', method);
-        params.append('redaction_mode', redactionMode);
-      } else {
-        params.append('method', method);
-      }
-
-      const response = await fetch(`${API_BASE_URL}${endpoint}?${params.toString()}`, {
+      // Use single endpoint for both video and image processing
+      const response = await fetch(`${API_BASE_URL}/process`, {
         method: 'POST',
         body: formData,
       });
@@ -146,7 +216,15 @@ export default function Home() {
       const resultData = await response.json();
       setResult(resultData);
       
-      // Refresh the list of processed files
+      // Add to recent files
+      const newFile: FileInfo = {
+        filename: resultData.output_file,
+        size: 0, // We don't have size info from the response, will be updated when fetched
+        download_url: resultData.download_url
+      };
+      addToRecentFiles(newFile);
+      
+      // Refresh the list of processed files from backend
       fetchProcessedFiles();
       
     } catch (err) {
@@ -154,19 +232,7 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
-  }, [file, fileType, method, redactionMode]);
-
-  const fetchProcessedFiles = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/files`);
-      if (response.ok) {
-        const data = await response.json();
-        setProcessedFiles(data.files);
-      }
-    } catch (error) {
-      console.error('Failed to fetch processed files:', error);
-    }
-  }, []);
+  }, [file, fetchProcessedFiles, addToRecentFiles]);
 
   const downloadFile = useCallback(async (filename: string) => {
     try {
@@ -223,19 +289,6 @@ export default function Home() {
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
     return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
-  }, []);
-
-  const handleVideoMouseEnter = useCallback(() => {
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current);
-    }
-    setShowControls(true);
-  }, []);
-
-  const handleVideoMouseLeave = useCallback(() => {
-    controlsTimeoutRef.current = setTimeout(() => {
-      setShowControls(false);
-    }, 0); // Instant hide when leaving video
   }, []);
 
   // Update current time for progress bar with more frequent updates
@@ -299,108 +352,118 @@ export default function Home() {
     };
   }, []);
 
-  // Fetch processed files on component mount
+  // Fetch processed files on component mount and load from localStorage
   useEffect(() => {
     fetchProcessedFiles();
+    
+    // Load recent files from localStorage
+    const savedFiles = localStorage.getItem('recentFiles');
+    if (savedFiles) {
+      try {
+        const parsedFiles = JSON.parse(savedFiles);
+        setProcessedFiles(parsedFiles);
+      } catch (error) {
+        console.error('Error loading saved files:', error);
+      }
+    }
   }, [fetchProcessedFiles]);
 
+  // Save files to localStorage whenever they change
+  useEffect(() => {
+    if (processedFiles.length > 0) {
+      localStorage.setItem('recentFiles', JSON.stringify(processedFiles));
+    }
+  }, [processedFiles]);
+
   // Memoized video component to prevent unnecessary re-renders
-  const VideoPlayer = useMemo(() => {
-    if (!file || fileType !== 'video') return null;
-    
-    return (
-      <>
-        <video
-          key={videoUrl}
-          ref={videoRef}
-          src={videoUrl || undefined}
-          className="w-full h-auto max-h-[40vh] max-w-full object-contain"
-          autoPlay
-          loop
-          muted={isMuted}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onTimeUpdate={() => {
-            if (videoRef.current) {
-              setCurrentTime(videoRef.current.currentTime);
-            }
-          }}
-        />
-        
-        {/* Close Button - Top Right of Video */}
-        <button
-          onClick={() => setFile(null)}
-          className="absolute top-3 right-3 text-white hover:text-[hsl(var(--tiktok-red))] hover:bg-black/50 bg-black/30 p-2 rounded-full transition-all duration-200 hover-lift z-10"
-          title="Close preview and return to upload"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </>
-    );
-  }, [file, fileType, videoUrl, isMuted, isPlaying]); // Add necessary dependencies
+  const VideoPlayer = useMemo(() => (
+    <div className="relative" onMouseEnter={handleVideoMouseEnter} onMouseLeave={handleVideoMouseLeave}>
+      <video
+        key={videoUrl}
+        ref={videoRef}
+        src={videoUrl || undefined}
+        className="w-full h-auto max-h-[40vh] max-w-full object-contain cursor-pointer"
+        autoPlay
+        loop
+        muted={isMuted}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onTimeUpdate={() => {
+          if (videoRef.current) {
+            setCurrentTime(videoRef.current.currentTime);
+          }
+        }}
+        onClick={togglePlayPause}
+      />
+    </div>
+  ), [file, fileType, videoUrl, isMuted, isPlaying, handleVideoMouseEnter, handleVideoMouseLeave, togglePlayPause]);
 
   // Separate VideoControls component that can update independently
   const VideoControls = useMemo(() => {
     if (!file || fileType !== 'video') return null;
     
     return (
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-        <div className={`transition-all duration-0 ease-in-out ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
-          {/* Progress Bar */}
-          <div className="mb-3">
-            <div className="relative w-full h-2 bg-black/50 rounded-full cursor-pointer" onClick={handleProgressBarClick}>
-              <div 
-                className="absolute top-0 left-0 h-full bg-[hsl(var(--tiktok-red))] rounded-full transition-all duration-75"
-                style={{ width: `${Math.min((currentTime / (videoRef.current?.duration || 1)) * 100, 100)}%` }}
-              ></div>
-              <div 
-                className="absolute top-0 h-full w-2 bg-[hsl(var(--tiktok-red))] rounded-full transform -translate-x-1/2 transition-all duration-75"
-                style={{ left: `${Math.min((currentTime / (videoRef.current?.duration || 1)) * 100, 100)}%` }}
-              ></div>
-            </div>
-            <div className="flex justify-between text-white text-xs mt-1">
-              <span>{formatTime(currentTime)}</span>
-              <span>{formatTime(videoRef.current?.duration || 0)}</span>
-            </div>
+      <div 
+        className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-all duration-200 ${
+          showControls ? 'opacity-100' : 'opacity-0'
+        }`}
+        onMouseEnter={handleControlsMouseEnter}
+        onMouseLeave={handleControlsMouseLeave}
+      >
+        {/* Progress Bar */}
+        <div className="mb-3">
+          <div 
+            className="w-full h-2 bg-white/30 rounded-full cursor-pointer relative"
+            onClick={handleProgressBarClick}
+          >
+            <div 
+              className="h-full bg-[hsl(var(--tiktok-red))] rounded-full transition-all duration-100"
+              style={{ width: `${(currentTime / (videoRef.current?.duration || 1)) * 100}%` }}
+            />
           </div>
+          <div className="flex justify-between text-white text-xs mt-1">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(videoRef.current?.duration || 0)}</span>
+          </div>
+        </div>
+        
+        {/* Control Buttons */}
+        <div className="flex items-center justify-center space-x-4">
+          <button
+            onClick={togglePlayPause}
+            className="bg-white/20 hover:bg-white/30 text-white p-2 rounded-full transition-all duration-200 hover-lift"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+          </button>
           
-          <div className="flex items-center justify-between">
-            <button
-              onClick={togglePlayPause}
-              className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white p-2.5 rounded-full transition-all duration-200 hover-lift"
-            >
-              {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-            </button>
-            
-            <button
-              onClick={toggleMute}
-              className="text-white hover:text-[hsl(var(--tiktok-red))] transition-all duration-200 p-2.5 rounded-full hover:bg-black/30"
-            >
-              {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-            </button>
-          </div>
+          <button
+            onClick={toggleMute}
+            className="bg-white/20 hover:bg-white/30 text-white p-2 rounded-full transition-all duration-200 hover-lift"
+            title={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+          </button>
         </div>
       </div>
     );
-  }, [file, fileType, showControls, currentTime, isPlaying, isMuted, handleProgressBarClick, formatTime, togglePlayPause, toggleMute]);
+  }, [file, fileType, showControls, currentTime, isPlaying, isMuted, handleProgressBarClick, formatTime, togglePlayPause, toggleMute, handleControlsMouseEnter, handleControlsMouseLeave]);
 
   return (
-    <div className="min-h-screen bg-[hsl(var(--background))] text-white flex">
-      {/* Left Sidebar - Navigation */}
-      <div className="w-64 bg-[hsl(var(--sidebar-bg))] border-r border-[hsl(var(--border-color))] p-6 fixed left-0 top-0 h-full">
-        {/* Logo */}
+    <div className="min-h-screen bg-[hsl(var(--background))] text-white flex overflow-x-hidden">
+      {/* Left Sidebar */}
+      <div className="fixed left-0 top-0 h-full w-64 bg-[hsl(var(--sidebar-bg))] border-r border-[hsl(var(--border-color))] p-6 pt-8 overflow-y-auto">
+        {/* Logo and Title */}
         <div className="mb-8">
-          <div className="flex items-center space-x-2 mb-2">
-            <Link href="/" className="flex items-center space-x-1 group">
-              <img src="/favicon.ico" alt="PII Pal" className="h-10 w-10 group-hover:scale-110 transition-transform duration-200" />
-              <h1 className="text-2xl font-bold text-white group-hover:text-[hsl(var(--tiktok-red))] transition-colors duration-200 cursor-pointer">
-                <span className="gradient-text">PII</span>Pal
-              </h1>
-            </Link>
-          </div>
-          <p className="text-sm text-gray-400">A Reels Moderation Tool.</p>
+          <Link href="/" className="flex items-center space-x-3 group">
+            <img src="/favicon.ico" alt="PII Pal" className="w-8 h-8" />
+            <div>
+              <h2 className="text-xl font-bold text-white group-hover:text-[hsl(var(--tiktok-red))] transition-all duration-200">
+                PII Pal
+              </h2>
+              <p className="text-sm text-gray-400">AI Reels Moderation Tool</p>
+            </div>
+          </Link>
         </div>
 
         {/* Search Bar */}
@@ -436,115 +499,111 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Main Content Area - Full Screen Upload */}
-      <div className="flex-1 ml-64 flex flex-col">
-        {/* Top Bar */}
-        <div className="flex justify-between items-center p-8 pb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-white mb-2">
-              <span className="gradient-text">Reels Moderation</span>
-            </h1>
-            <p className="text-gray-400">
-              Automatically detects and blurs sensitive information in your content
-            </p>
+      {/* Main Content Area */}
+      <div className="flex-1 ml-64 overflow-y-auto">
+        <div className="p-6 pt-8 max-w-full">
+          {/* Top Bar */}
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-2">
+                <span className="gradient-text">PII Agent</span>
+              </h1>
+              <p className="text-gray-400">
+                Automatically detects and blurs personally identifiable information in your content.
+              </p>
+            </div>
+            <div className="flex space-x-4">
+              <a 
+                href="https://devpost.com" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"
+              >
+                DevPost
+              </a>
+              <a 
+                href="https://github.com" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"
+              >
+                GitHub
+              </a>
+              <a 
+                href="#demo" 
+                className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white px-6 py-2 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow"
+              >
+                Demo
+              </a>
+            </div>
           </div>
-          <div className="flex space-x-4">
-            <a 
-              href="https://devpost.com" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"
-            >
-              DevPost
-            </a>
-            <a 
-              href="https://github.com" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"
-            >
-              GitHub
-            </a>
-            <a 
-              href="#demo" 
-              className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white px-6 py-2 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow"
-            >
-              Demo
-            </a>
-          </div>
-        </div>
 
-        {/* Main Upload Area - Takes Full Remaining Space */}
-        <div className="flex-1 px-8 pb-6">
-          {/* Upload Content - Full Width */}
-          {!file ? (
-            <div className="w-full">
-              {/* Upload Zone */}
-              <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-6 hover-glow transition-all duration-200">
-                <h2 className="text-2xl font-semibold mb-4 text-white text-center">
-                  <span className="gradient-text">Upload Content</span>
-                </h2>
-                
+          {/* Upload Content Section - Only show when no file is selected */}
+          {!file && (
+            <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-6 hover-glow transition-all duration-200 mb-6">
+              <h2 className="text-xl font-semibold mb-4 text-white text-center">
+                <span className="gradient-text">Upload Content</span>
+              </h2>
+              
+              <div className="max-w-2xl mx-auto">
                 <div
-                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 cursor-pointer flex flex-col items-center justify-center min-h-[300px] ${
-                    dragActive 
-                      ? 'border-[hsl(var(--tiktok-red))] bg-[hsl(var(--tiktok-red))]/5 scale-105' 
-                      : 'border-[hsl(var(--border-color))] bg-[hsl(var(--interaction-bg))] hover:border-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--hover-bg))]'
+                  className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+                    dragActive
+                      ? 'border-[hsl(var(--tiktok-red))] bg-[hsl(var(--tiktok-red))]/10' 
+                      : 'border-[hsl(var(--border-color))] hover:border-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--border-color))]/10'
                   }`}
-                  onClick={() => fileInputRef.current?.click()}
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                 >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="video/*,image/*"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                  
-                  <div className="text-center">
-                    <Upload className={`mx-auto h-16 w-16 mb-4 transition-all duration-300 ${
-                      dragActive ? 'text-[hsl(var(--tiktok-red))] scale-110' : 'text-gray-400'
-                    }`} />
-                    <p className="text-xl text-gray-300 mb-2 font-medium">
-                      {dragActive ? 'Drop your file here!' : 'Click to upload or drag and drop'}
-                    </p>
-                    <p className="text-gray-500">
-                      Supports videos (MP4, AVI, MOV) and images (JPG, PNG, BMP)
-                    </p>
-                    {dragActive && (
-                      <p className="text-[hsl(var(--tiktok-red))] font-medium mt-3 animate-pulse">
-                        Release to upload!
-                      </p>
-                    )}
+                  <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-lg text-white mb-2">Drop your file here</p>
+                  <p className="text-gray-400 mb-4">or</p>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white py-2 px-6 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow"
+                  >
+                    Browse Files
+                  </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*,image/*"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+                </div>
                   </div>
                 </div>
+              )}
 
-                {error && (
-                  <div className="mt-4 p-3 bg-red-900/20 border border-red-700 rounded-lg flex items-center space-x-3">
-                    <AlertCircle className="h-4 w-4 text-red-400" />
-                    <span className="text-red-300 text-sm">{error}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* File Preview and Processing - Full Width */
-            <div className="w-full space-y-4">
-              {/* File Preview */}
-              <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
-                <h2 className="text-lg font-semibold mb-3 text-white text-center">
-                  <span className="gradient-text">File Preview</span>
-                </h2>
-                
-                <div className="max-w-3xl mx-auto">
-                  <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden mb-3" onMouseEnter={handleVideoMouseEnter} onMouseLeave={handleVideoMouseLeave}>
+          {/* File Preview and Processing - Show when file is selected */}
+          {file && (
+            <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-6 hover-glow transition-all duration-200 mb-6">
+              <h2 className="text-xl font-semibold mb-4 text-white text-center">
+                <span className="gradient-text">
+                  {result ? 'Processing Complete' : 'File Preview'}
+                </span>
+              </h2>
+              
+              <div className="max-w-6xl mx-auto">
+                {/* Video/Image Preview - Only show when not yet processed */}
+                {!result && (
+                  <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden mb-6" onMouseEnter={handleVideoMouseEnter} onMouseLeave={handleVideoMouseLeave}>
                     {fileType === 'video' ? (
                       <>
                         {VideoPlayer}
                         {VideoControls}
+                        {/* Close Button - Top Right of Video */}
+                        <button
+                          onClick={() => setFile(null)}
+                          className="absolute top-3 right-3 text-white hover:text-[hsl(var(--tiktok-red))] hover:bg-black/50 bg-black/30 p-2 rounded-full transition-all duration-200 hover-lift z-10"
+                          title="Close preview and return to upload"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
                       </>
                     ) : (
                       <>
@@ -553,7 +612,6 @@ export default function Home() {
                           alt="Preview"
                           className="w-full h-auto max-h-[40vh] max-w-full object-contain"
                         />
-                        
                         {/* Close Button - Top Right of Image */}
                         <button
                           onClick={() => setFile(null)}
@@ -567,90 +625,138 @@ export default function Home() {
                       </>
                     )}
                   </div>
-                  
-                  <div className="text-center">
-                    <p className="text-white font-medium text-sm">
-                      {file.name} • {(file.size / 1024 / 1024).toFixed(2)} MB • {fileType.toUpperCase()}
+                )}
+
+                {/* Processing Options - Show when not yet processed */}
+                {!result && (
+                  <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
+                    <h3 className="text-lg font-semibold mb-3 text-white text-center">
+                      <span className="gradient-text">PiiPal is Ready!</span>
+                    </h3>
+                    
+                    <p className="text-gray-400 text-center mb-4">
+                      Files are automatically processed using YOLOE detection and pixelation censoring.
                     </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Processing Options */}
-              <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
-                <h3 className="text-lg font-semibold mb-3 text-white text-center">
-                  <span className="gradient-text">Processing Options</span>
-                </h3>
-                
-                <div className="max-w-2xl mx-auto">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Detection Method
-                      </label>
-                      <select
-                        value={method}
-                        onChange={(e) => setMethod(e.target.value)}
-                        className="w-full px-4 py-3 bg-[hsl(var(--interaction-bg))] border border-[hsl(var(--border-color))] rounded-lg text-white focus:outline-none focus:border-[hsl(var(--tiktok-red))] focus:ring-1 focus:ring-[hsl(var(--tiktok-red))] transition-all duration-200 hover:bg-[hsl(var(--hover-bg))]"
-                      >
-                        {fileType === 'video' ? (
-                          <>
-                            <option value="ocr">OCR (Text Detection)</option>
-                            <option value="yolo">YOLO (Object Detection)</option>
-                            <option value="combined">Combined</option>
-                          </>
-                        ) : (
-                          <option value="yolo">YOLO (Object Detection)</option>
-                        )}
-                      </select>
+                    
+                    <div className="text-center">
+              <button
+                onClick={processFile}
+                disabled={isProcessing}
+                        className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 disabled:bg-gray-600 text-white py-3 px-8 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow disabled:cursor-not-allowed"
+              >
+                {isProcessing ? (
+                          <div className="flex items-center space-x-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Processing...</span>
+                          </div>
+                ) : (
+                          'Censor'
+                )}
+              </button>
                     </div>
+            </div>
+          )}
 
-                    {fileType === 'video' && (
+                {/* Processing Complete - Show when processing is done */}
+          {result && (
+                  <>
+                    {/* Side by Side Comparison */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                      {/* Original File */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                          Redaction Mode
-                        </label>
-                        <select
-                          value={redactionMode}
-                          onChange={(e) => setRedactionMode(e.target.value)}
-                          className="w-full px-4 py-3 bg-[hsl(var(--interaction-bg))] border border-[hsl(var(--border-color))] rounded-lg text-white focus:outline-none focus:border-[hsl(var(--tiktok-red))] focus:ring-1 focus:ring-[hsl(var(--border-color))] transition-all duration-200 hover:bg-[hsl(var(--hover-bg))]"
-                        >
-                          <option value="pixelate">Pixelate</option>
-                          <option value="blur">Blur</option>
-                          <option value="blackout">Blackout</option>
-                        </select>
+                        <h4 className="text-white font-medium mb-3 text-center">Original</h4>
+                        <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden" onMouseEnter={() => setShowControls(true)} onMouseLeave={() => setShowControls(false)}>
+                          {fileType === 'video' ? (
+                            <>
+                              <video
+                                ref={originalVideoRef}
+                                src={file ? URL.createObjectURL(file) : undefined}
+                                className="w-full h-auto max-h-[40vh] max-w-full object-contain cursor-pointer"
+                                autoPlay
+                                loop
+                                muted
+                                onTimeUpdate={() => {
+                                  if (originalVideoRef.current && censoredVideoRef.current) {
+                                    censoredVideoRef.current.currentTime = originalVideoRef.current.currentTime;
+                                  }
+                                }}
+                                onClick={(e) => {
+                                  const video = e.currentTarget;
+                                  if (video.paused) {
+                                    video.play();
+                                  } else {
+                                    video.pause();
+                                  }
+                                }}
+                              />
+                              {/* Play/Pause Indicator */}
+                              {showControls && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity duration-200">
+                                  <div className="bg-black/50 rounded-full p-3">
+                                    <Play className="h-6 w-6 text-white" />
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <img
+                              src={file ? URL.createObjectURL(file) : undefined}
+                              alt="Original"
+                              className="w-full h-auto max-h-[40vh] max-w-full object-contain"
+                            />
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="text-center">
-                    <button
-                      onClick={processFile}
-                      disabled={isProcessing}
-                      className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 disabled:bg-gray-600 text-white py-3 px-8 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-3 disabled:cursor-not-allowed hover-lift hover-glow mx-auto"
-                    >
-                      {isProcessing ? (
-                        <>
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                          <span>Processing...</span>
-                        </>
-                      ) : (
-                        <span>Process Content</span>
-                      )}
-                    </button>
-                  </div>
+                      
+                      {/* Censored File */}
+                <div>
+                        <h4 className="text-white font-medium mb-3 text-center">Censored</h4>
+                        <div className="relative bg-[hsl(var(--interaction-bg))] rounded-lg overflow-hidden" onMouseEnter={() => setShowControls(true)} onMouseLeave={() => setShowControls(false)}>
+                          {fileType === 'video' ? (
+                            <>
+                              <video
+                                ref={censoredVideoRef}
+                                src={`${API_BASE_URL}/download/${result.output_file}`}
+                                className="w-full h-auto max-h-[40vh] max-w-full object-contain cursor-pointer"
+                                autoPlay
+                                loop
+                                muted
+                                onTimeUpdate={() => {
+                                  if (censoredVideoRef.current && originalVideoRef.current) {
+                                    originalVideoRef.current.currentTime = censoredVideoRef.current.currentTime;
+                                  }
+                                }}
+                                onClick={(e) => {
+                                  const video = e.currentTarget;
+                                  if (video.paused) {
+                                    video.play();
+                                  } else {
+                                    video.pause();
+                                  }
+                                }}
+                              />
+                              {/* Play/Pause Indicator */}
+                              {showControls && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 hover:opacity-100 transition-opacity duration-200">
+                                  <div className="bg-black/50 rounded-full p-3">
+                                    <Play className="h-6 w-6 text-white" />
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <img
+                              src={`${API_BASE_URL}/download/${result.output_file}`}
+                              alt="Censored"
+                              className="w-full h-auto max-h-[40vh] max-w-full object-contain"
+                            />
+                          )}
+                        </div>
                 </div>
               </div>
 
-              {/* Results Section */}
-              {result && (
-                <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
-                  <h3 className="text-lg font-semibold mb-3 text-white text-center">
-                    <span className="gradient-text">Processing Complete</span>
-                  </h3>
-                  
-                  <div className="max-w-2xl mx-auto">
-                    <div className="bg-green-900/20 border border-green-700 rounded-lg p-4 flex items-center space-x-3 mb-4">
+                    {/* Success Message */}
+                    <div className="bg-green-900/20 border border-green-700 rounded-lg p-4 flex items-center space-x-3 mb-6">
                       <CheckCircle className="h-6 w-6 text-green-400" />
                       <div>
                         <p className="font-medium text-green-300">{result.message}</p>
@@ -658,62 +764,200 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="text-center">
+                    {/* Action Buttons */}
+                    <div className="flex items-center justify-center space-x-4">
+              <button
+                onClick={() => downloadFile(result.output_file)}
+                        className="bg-green-600 hover:bg-green-700 text-white py-3 px-6 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover-lift hover-glow"
+              >
+                <Download className="h-4 w-4" />
+                <span>Download Processed File</span>
+              </button>
+                      
                       <button
-                        onClick={() => downloadFile(result.output_file)}
-                        className="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover-lift hover-glow mx-auto"
+                        onClick={() => {
+                          setFile(null);
+                          setResult(null);
+                          setError(null);
+                        }}
+                        className="bg-[hsl(var(--tiktok-blue))] hover:bg-[hsl(var(--tiktok-blue))]/90 text-white py-3 px-6 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover-lift hover-glow"
                       >
-                        <Download className="h-4 w-4" />
-                        <span>Download Processed File</span>
+                        <Plus className="h-4 w-4" />
+                        <span>New File</span>
                       </button>
                     </div>
-                  </div>
-                </div>
-              )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
-              {/* Recent Files */}
-              {processedFiles.length > 0 && (
-                <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
-                  <h3 className="text-lg font-semibold mb-3 text-white text-center">
-                    <span className="gradient-text">Recent Files</span>
-                  </h3>
-                  
-                  <div className="max-w-4xl mx-auto">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {processedFiles.slice(0, 6).map((fileInfo, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-3 border border-[hsl(var(--border-color))] rounded-lg bg-[hsl(var(--interaction-bg))] hover:bg-[hsl(var(--hover-bg))] transition-all duration-200 hover-lift"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-white text-sm truncate">{fileInfo.filename}</p>
-                            <p className="text-gray-400 text-xs">
-                              {(fileInfo.size / 1024 / 1024).toFixed(2)} MB
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => downloadFile(fileInfo.filename)}
-                            className="bg-[hsl(var(--tiktok-blue))] hover:bg-[hsl(var(--tiktok-blue))]/90 text-white p-2 rounded-lg text-xs font-medium transition-all duration-200 hover-lift hover-glow flex-shrink-0"
-                          >
-                            <Download className="h-3 w-3" />
-                          </button>
+          {/* Error Display */}
+          {error && (
+            <div className="bg-red-900/20 border border-red-700 rounded-lg p-4 mb-6">
+              <div className="flex items-center space-x-3">
+                <AlertCircle className="h-6 w-6" />
+                <p className="text-red-300">{error}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Files - Always show */}
+          {processedFiles.length > 0 && (
+            <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-6 hover-glow transition-all duration-200">
+              <h3 className="text-lg font-semibold mb-4 text-white text-center">
+                <span className="gradient-text">Recent Files</span>
+              </h3>
+              
+              <div className="max-w-4xl mx-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {processedFiles.slice(0, 6).map((fileInfo, index) => {
+                    const isVideo = fileInfo.filename.toLowerCase().includes('.mp4') || 
+                                   fileInfo.filename.toLowerCase().includes('.avi') || 
+                                   fileInfo.filename.toLowerCase().includes('.mov');
+                    const isImage = fileInfo.filename.toLowerCase().includes('.jpg') || 
+                                  fileInfo.filename.toLowerCase().includes('.jpeg') || 
+                                  fileInfo.filename.toLowerCase().includes('.png');
+                    
+                    return (
+                  <div
+                    key={index}
+                        className="border border-[hsl(var(--border-color))] rounded-lg bg-[hsl(var(--interaction-bg))] hover:bg-[hsl(var(--hover-bg))] transition-all duration-200 hover-lift cursor-pointer overflow-hidden"
+                        onClick={() => setSelectedCensoredFile(selectedCensoredFile === fileInfo.filename ? null : fileInfo.filename)}
+                      >
+                        {/* File Preview */}
+                        <div className="relative aspect-video bg-[hsl(var(--interaction-bg))] overflow-hidden">
+                          {isVideo ? (
+                            <video
+                              className="w-full h-full object-cover"
+                              src={`${API_BASE_URL}/download/${fileInfo.filename}`}
+                              muted
+                              loop
+                              preload="metadata"
+                            />
+                          ) : isImage ? (
+                            <img
+                              src={`${API_BASE_URL}/download/${fileInfo.filename}`}
+                              alt="File Preview"
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Download className="h-8 w-8 text-gray-400" />
+                            </div>
+                          )}
                         </div>
-                      ))}
+                        
+                        {/* File Info */}
+                        <div className="p-3">
+                          <p className="font-medium text-white text-sm truncate mb-1">{fileInfo.filename}</p>
+                          <p className="text-gray-400 text-xs mb-2">
+                        {(fileInfo.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-gray-500">
+                              {isVideo ? 'VIDEO' : isImage ? 'IMAGE' : 'FILE'}
+                            </span>
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // Remove file from processed files
+                                  setProcessedFiles(prev => prev.filter(f => f.filename !== fileInfo.filename));
+                                  // Remove from localStorage
+                                  const savedFiles = localStorage.getItem('recentFiles');
+                                  if (savedFiles) {
+                                    try {
+                                      const parsedFiles = JSON.parse(savedFiles);
+                                      const updatedFiles = parsedFiles.filter((f: FileInfo) => f.filename !== fileInfo.filename);
+                                      localStorage.setItem('recentFiles', JSON.stringify(updatedFiles));
+                                    } catch (error) {
+                                      console.error('Error updating localStorage:', error);
+                                    }
+                                  }
+                                }}
+                                className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg text-xs font-medium transition-all duration-200 hover-lift hover-glow flex-shrink-0"
+                                title="Delete from history"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadFile(fileInfo.filename);
+                                }}
+                                className="bg-[hsl(var(--tiktok-blue))] hover:bg-[hsl(var(--tiktok-blue))]/90 text-white p-2 rounded-lg text-xs font-medium transition-all duration-200 hover-lift hover-glow flex-shrink-0"
+                                title="Download file"
+                              >
+                                <Download className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {/* Selected File Full Preview */}
+                {selectedCensoredFile && (
+                  <div className="mt-6 bg-[hsl(var(--interaction-bg))] rounded-lg border border-[hsl(var(--border-color))] p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-white font-medium">Preview: {selectedCensoredFile}</h4>
+                      <button
+                        onClick={() => setSelectedCensoredFile(null)}
+                        className="text-gray-400 hover:text-white hover:bg-[hsl(var(--hover-bg))] p-2 rounded-lg transition-all duration-200"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
                     
-                    {processedFiles.length > 6 && (
-                      <div className="mt-3 text-center">
-                        <Link 
-                          href="/explore" 
-                          className="text-[hsl(var(--tiktok-red))] hover:text-[hsl(var(--tiktok-red))]/80 font-medium transition-all duration-200 hover:underline text-sm"
-                        >
-                          View All Files →
-                        </Link>
-                      </div>
-                    )}
+                    <div className="relative bg-black rounded-lg overflow-hidden">
+                      {selectedCensoredFile.toLowerCase().includes('.mp4') || 
+                       selectedCensoredFile.toLowerCase().includes('.avi') || 
+                       selectedCensoredFile.toLowerCase().includes('.mov') ? (
+                        <video
+                          className="w-full h-auto max-h-[50vh] max-w-full object-contain cursor-pointer"
+                          src={`${API_BASE_URL}/download/${selectedCensoredFile}`}
+                          autoPlay
+                          loop
+                          muted
+                          preload="metadata"
+                          onClick={(e) => {
+                            const video = e.currentTarget;
+                            if (video.paused) {
+                              video.play();
+                            } else {
+                              video.pause();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <img
+                          src={`${API_BASE_URL}/download/${selectedCensoredFile}`}
+                          alt="File Preview"
+                          className="w-full h-auto max-h-[50vh] max-w-full object-contain"
+                          loading="lazy"
+                        />
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+                
+                {processedFiles.length > 6 && (
+                  <div className="mt-4 text-center">
+                    <Link 
+                      href="/explore" 
+                      className="text-[hsl(var(--tiktok-red))] hover:text-[hsl(var(--tiktok-red))]/80 font-medium transition-all duration-200 hover:underline text-sm"
+                    >
+                      View All Files →
+                    </Link>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
