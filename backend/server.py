@@ -422,10 +422,15 @@ async def delete_user_account(current_user: Dict[str, Any] = Depends(get_current
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+    
+    # Get port from environment variable (for Render) or default to 8000
+    port = int(os.environ.get("PORT", 8000))
+    
     uvicorn.run(
         app, 
         host="0.0.0.0", 
-        port=8000,
+        port=port,
         # Increase limits for file uploads
         limit_max_requests=1000,
         limit_concurrency=1000,
