@@ -185,11 +185,11 @@ class ApiService {
   }
 
   // User-specific endpoints
-  async getUserProfile(): Promise<ApiResponse<any>> {
+  async getUserProfile(): Promise<ApiResponse<unknown>> {
     return this.request('/user/profile');
   }
 
-  async getUserStats(): Promise<ApiResponse<any>> {
+  async getUserStats(): Promise<ApiResponse<unknown>> {
     return this.request('/user/stats');
   }
 

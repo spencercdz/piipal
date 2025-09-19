@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Upload, Download, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2, LogIn, User, Settings as SettingsIcon } from 'lucide-react';
+import { Upload, Download, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2, Settings as SettingsIcon } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import Link from 'next/link';
 // Note: DebugInfo component removed - no longer needed
@@ -10,7 +10,7 @@ import UserProfile from '@/components/UserProfile';
 // Note: session-storage removed - files now managed by Supabase Storage
 import { useRouter } from 'next/navigation';
 import { useFileProcessing } from '@/hooks/useFileProcessing';
-import { apiService } from '@/lib/api';
+// Note: apiService import removed - using useFileProcessing hook instead
 import SettingsPage from '@/components/SettingsPage';
 
 // API configuration
@@ -25,12 +25,7 @@ interface FileInfo {
   censoredFile?: string; // Store the censored file name
 }
 
-interface ProcessingResult {
-  message: string;
-  output_file: string;
-  download_url: string;
-  file_type: string;
-}
+// Note: ProcessingResult interface removed - using type from useFileProcessing hook
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
@@ -55,14 +50,7 @@ export default function Home() {
   // Local state for additional functionality
   const [localProcessedFiles, setLocalProcessedFiles] = useState<FileInfo[]>([]);
   
-  // Combine processed files from hook and local state
-  const allProcessedFiles = useMemo(() => {
-    const combined = [...localProcessedFiles, ...processedFiles];
-    // Remove duplicates based on filename
-    return combined.filter((file, index, self) => 
-      index === self.findIndex(f => f.filename === file.filename)
-    );
-  }, [localProcessedFiles, processedFiles]);
+  // Note: allProcessedFiles removed - using processedFiles from hook directly
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);

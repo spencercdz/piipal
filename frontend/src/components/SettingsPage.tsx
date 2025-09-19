@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserData } from '@/hooks/useUserData'
-import { User, Mail, Calendar, Settings as SettingsIcon, Save, Eye, EyeOff, CheckCircle, AlertCircle, LogOut, Trash2 } from 'lucide-react'
+import { User, Mail, Calendar, Settings as SettingsIcon, Save, CheckCircle, AlertCircle, LogOut, Trash2 } from 'lucide-react'
 import LoadingSpinner from './LoadingSpinner'
 import { supabase } from '@/lib/supabase'
 
@@ -20,7 +20,6 @@ export default function SettingsPage() {
   const [language, setLanguage] = useState('en')
   
   // UI states
-  const [showPassword, setShowPassword] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
