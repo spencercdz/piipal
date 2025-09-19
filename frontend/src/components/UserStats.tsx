@@ -22,16 +22,16 @@ export default function UserStats() {
       try {
         const response = await apiService.getUserStats()
         if (response.data) {
-          const d: any = response.data
+          const data = response.data as Record<string, unknown>
           const isValid =
-            typeof d.total_files === 'number' &&
-            typeof d.completed_files === 'number' &&
-            typeof d.images_processed === 'number' &&
-            typeof d.videos_processed === 'number' &&
-            typeof d.this_month === 'number'
+            typeof data.total_files === 'number' &&
+            typeof data.completed_files === 'number' &&
+            typeof data.images_processed === 'number' &&
+            typeof data.videos_processed === 'number' &&
+            typeof data.this_month === 'number'
 
           if (isValid) {
-            setStats(d as UserStats)
+            setStats(data as unknown as UserStats)
           }
         }
       } catch (error) {

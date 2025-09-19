@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle, Sparkles } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import LoadingSpinner from '@/components/LoadingSpinner'
+import Image from 'next/image'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -100,7 +101,7 @@ export default function LoginPage() {
         {/* Logo and Title */}
         <div className="text-center mb-8" style={{ userSelect: 'none' }}>
           <div className="flex items-center justify-center mb-4">
-            <img src="/favicon.ico" alt="PIIPal" className="w-16 h-16" />
+            <Image src="/favicon.ico" alt="PIIPal" width={64} height={64} className="w-16 h-16" />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">
             <span className="bg-gradient-to-r from-[hsl(var(--tiktok-red))] to-pink-500 bg-clip-text text-transparent">

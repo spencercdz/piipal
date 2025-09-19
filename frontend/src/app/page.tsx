@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Upload, Download, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2, Settings as SettingsIcon } from 'lucide-react';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import Link from 'next/link';
+import Image from 'next/image';
 // Note: DebugInfo component removed - no longer needed
 import { useAuth } from '@/contexts/AuthContext';
 import UserProfile from '@/components/UserProfile';
@@ -270,7 +271,7 @@ export default function Home() {
     if (result) {
       // Note: File management now handled by Supabase Storage
     }
-  }, [file, processFileWithHook, result, clearError, clearResult, setError]);
+  }, [file, processFileWithHook, result, clearError, clearResult]);
 
   const downloadFile = useCallback(async (filename: string) => {
     await downloadFileWithHook(filename);
@@ -334,8 +335,9 @@ export default function Home() {
       }, 50); // Update every 50ms for very smooth progress bar
       
       return () => {
-        if (videoRef.current) {
-          videoRef.current.removeEventListener('timeupdate', handleTimeUpdate);
+        const video = videoRef.current;
+        if (video) {
+          video.removeEventListener('timeupdate', handleTimeUpdate);
         }
         clearInterval(interval);
       };
@@ -359,8 +361,9 @@ export default function Home() {
       
       videoRef.current.addEventListener('ended', handleVideoEnd);
       return () => {
-        if (videoRef.current) {
-          videoRef.current.removeEventListener('ended', handleVideoEnd);
+        const video = videoRef.current;
+        if (video) {
+          video.removeEventListener('ended', handleVideoEnd);
         }
       };
     }
@@ -477,7 +480,7 @@ export default function Home() {
         {/* Logo and Title */}
         <div className="mb-8">
           <Link href="/" className="flex items-center space-x-3 group">
-            <img src="/favicon.ico" alt="PII Pal" className="w-8 h-8" />
+            <Image src="/favicon.ico" alt="PII Pal" width={32} height={32} className="w-8 h-8" />
             <div>
               <h2 className="text-xl font-bold text-white group-hover:text-[hsl(var(--tiktok-red))] transition-all duration-200">
                 <span className="gradient-text">PII</span>Pal

@@ -25,6 +25,30 @@ export function useFileProcessing(): UseFileProcessingReturn {
   const [error, setError] = useState<string | null>(null);
   const [processedFiles, setProcessedFiles] = useState<FileInfo[]>([]);
 
+  const loadProcessedFiles = useCallback(async () => {
+    try {
+      const response = await apiService.listFiles();
+      if (response.error) {
+        // Only set error if it's not an authentication issue
+        if (!response.error.toLowerCase().includes('authentication') && 
+            !response.error.toLowerCase().includes('unauthorized') &&
+            !response.error.toLowerCase().includes('401')) {
+          setError(response.error);
+        }
+      } else if (response.data) {
+        setProcessedFiles(response.data.files);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load files';
+      // Only set error if it's not an authentication issue
+      if (!errorMessage.toLowerCase().includes('authentication') && 
+          !errorMessage.toLowerCase().includes('unauthorized') &&
+          !errorMessage.toLowerCase().includes('401')) {
+        setError(errorMessage);
+      }
+    }
+  }, []);
+
   const processFile = useCallback(async (file: File) => {
     setIsProcessing(true);
     setProgress(0);
@@ -69,30 +93,6 @@ export function useFileProcessing(): UseFileProcessingReturn {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed');
-    }
-  }, []);
-
-  const loadProcessedFiles = useCallback(async () => {
-    try {
-      const response = await apiService.listFiles();
-      if (response.error) {
-        // Only set error if it's not an authentication issue
-        if (!response.error.toLowerCase().includes('authentication') && 
-            !response.error.toLowerCase().includes('unauthorized') &&
-            !response.error.toLowerCase().includes('401')) {
-          setError(response.error);
-        }
-      } else if (response.data) {
-        setProcessedFiles(response.data.files);
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load files';
-      // Only set error if it's not an authentication issue
-      if (!errorMessage.toLowerCase().includes('authentication') && 
-          !errorMessage.toLowerCase().includes('unauthorized') &&
-          !errorMessage.toLowerCase().includes('401')) {
-        setError(errorMessage);
-      }
     }
   }, []);
 
