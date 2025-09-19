@@ -166,7 +166,7 @@ export default function Home() {
         setFile(null);
       }
     }
-  }, []);
+  }, [clearError, clearResult, setError]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -207,7 +207,7 @@ export default function Home() {
         setFile(null);
       }
     }
-  }, []);
+  }, [clearError, clearResult, setError]);
 
   const handleVideoMouseEnter = useCallback(() => {
     setShowControls(true);
@@ -254,12 +254,7 @@ export default function Home() {
     setShowControls(false);
   }, []);
 
-  const addToRecentFiles = useCallback((newFile: FileInfo) => {
-    setLocalProcessedFiles((prev: FileInfo[]) => {
-      const updated = [newFile, ...prev.filter(f => f.filename !== newFile.filename)];
-      return updated.slice(0, 20); // Keep only last 20 files
-    });
-  }, []);
+  // Note: addToRecentFiles removed - files now managed by Supabase Storage
 
   const processFile = useCallback(async () => {
     if (!file) return;
@@ -273,16 +268,9 @@ export default function Home() {
     
     // Add to recent files for local storage persistence
     if (result) {
-      const newFile: FileInfo = {
-        filename: result.output_file,
-        size: file.size,
-        download_url: result.download_url,
-        originalFileUrl: URL.createObjectURL(file),
-        censoredFile: result.output_file
-      };
-      addToRecentFiles(newFile);
+      // Note: File management now handled by Supabase Storage
     }
-  }, [file, processFileWithHook, result, clearError, clearResult]);
+  }, [file, processFileWithHook, result, clearError, clearResult, setError]);
 
   const downloadFile = useCallback(async (filename: string) => {
     await downloadFileWithHook(filename);
@@ -974,8 +962,7 @@ export default function Home() {
                                   if (fileInfo.originalFileUrl) {
                                     URL.revokeObjectURL(fileInfo.originalFileUrl);
                                   }
-                                  // Remove file from processed files
-                                  setLocalProcessedFiles((prev: FileInfo[]) => prev.filter(f => f.filename !== fileInfo.filename));
+                                  // Note: File deletion now handled by Supabase Storage
                                 }}
                                 className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg text-xs font-medium transition-all duration-200 hover-lift hover-glow flex-shrink-0"
                                 title="Delete from history"

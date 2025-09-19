@@ -59,7 +59,7 @@ export default function SettingsPage() {
       } else {
         setSuccessMessage('Profile updated successfully')
       }
-    } catch (error) {
+    } catch {
       setErrorMessage('Failed to update profile')
     } finally {
       setIsSaving(false)
@@ -86,7 +86,7 @@ export default function SettingsPage() {
       } else {
         setSuccessMessage('Preferences updated successfully')
       }
-    } catch (error) {
+    } catch {
       setErrorMessage('Failed to update preferences')
     } finally {
       setIsSaving(false)

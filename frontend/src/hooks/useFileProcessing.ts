@@ -49,7 +49,7 @@ export function useFileProcessing(): UseFileProcessingReturn {
       setIsProcessing(false);
       setProgress(0);
     }
-  }, []);
+  }, [loadProcessedFiles]);
 
   const downloadFile = useCallback(async (filename: string) => {
     try {

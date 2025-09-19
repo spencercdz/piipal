@@ -89,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const initializeUserData = async (user: User) => {
     try {
       // Check if user profile exists
-      const { data: profile, error: profileError } = await getUserProfile(user.id)
+      const { error: profileError } = await getUserProfile(user.id)
       
       if (profileError && profileError.code === 'PGRST116') {
         // Profile doesn't exist, create it

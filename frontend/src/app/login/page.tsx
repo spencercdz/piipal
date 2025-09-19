@@ -46,7 +46,7 @@ export default function LoginPage() {
           return
         }
         
-        const { data, error } = await signUp(email, password)
+        const { error } = await signUp(email, password)
         if (error) {
           setError(error instanceof Error ? error.message : 'Sign up failed')
         } else {
@@ -57,7 +57,7 @@ export default function LoginPage() {
           setConfirmPassword('')
         }
       } else {
-        const { data, error } = await signIn(email, password)
+        const { error } = await signIn(email, password)
         if (error) {
           setError(error instanceof Error ? error.message : 'Sign in failed')
         } else {
@@ -67,7 +67,7 @@ export default function LoginPage() {
           }, 1000)
         }
       }
-    } catch (err) {
+    } catch {
       setError('An unexpected error occurred')
     } finally {
       setLoading(false)

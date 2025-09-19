@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { 
   getUserProfile, 
@@ -17,17 +17,7 @@ export function useUserData() {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (user) {
-      loadUserData()
-    } else {
-      setProfile(null)
-      setPreferences(null)
-      setLoading(false)
-    }
-  }, [user])
-
-  const loadUserData = async () => {
+  const loadUserData = useCallback(async () => {
     if (!user) return
 
     setLoading(true)
@@ -45,7 +35,17 @@ export function useUserData() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user])
+
+  useEffect(() => {
+    if (user) {
+      loadUserData()
+    } else {
+      setProfile(null)
+      setPreferences(null)
+      setLoading(false)
+    }
+  }, [user, loadUserData])
 
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!user) return

@@ -121,7 +121,7 @@ class ApiService {
                 status: xhr.status,
               });
             }
-          } catch (error) {
+          } catch {
             resolve({
               error: 'Invalid response format',
               status: xhr.status,
