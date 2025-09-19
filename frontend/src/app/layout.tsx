@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { TikTok_Sans } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 const tiktokSans = TikTok_Sans({
   variable: "--font-tiktok-sans",
@@ -28,7 +29,9 @@ export default function RootLayout({
       <body
         className={`${tiktokSans.variable} ${tiktokMono.variable} antialiased bg-black text-white`}
       >
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

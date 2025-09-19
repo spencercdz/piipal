@@ -50,14 +50,14 @@
 
 /* Custom gradient text utility */
 .gradient-text {
-  background: linear-gradient(90deg, hsl(var(--tiktok-red)), hsl(var(--tiktok-blue)));
+  background: linear-gradient(90deg, hsl(var(--tiktok-blue)), hsl(var(--tiktok-blue)));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .gradient-text-blue {
-  background: linear-gradient(90deg, hsl(var(--tiktok-blue)), hsl(var(--tiktok-red)));
+  background: linear-gradient(90deg, hsl(var(--tiktok-blue)), hsl(var(--tiktok-blue)));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

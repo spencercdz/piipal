@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2
 import glob
 import os
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Union
 import numpy as np
 from moviepy.editor import VideoFileClip
 from .tracker import BoxTracker
@@ -141,7 +141,7 @@ def run_image_pixelate(
     imgsz: int = 640,
     conf: float = 0.25,
     verbose: bool = False,
-    kernel: Tuple[int, int] | None = None,   # e.g., (99, 99) for very strong blur
+    kernel: Union[Tuple[int, int], None] = None,   # e.g., (99, 99) for very strong blur
     sigmaX: float = 0,                        # 0 lets OpenCV choose based on kernel
     padding_px: int = 0  ,                     # optional padding around each box
     save: bool = True,

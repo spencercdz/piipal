@@ -1,8 +1,17 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Upload, Download, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2 } from 'lucide-react';
+import { Upload, Download, CheckCircle, AlertCircle, HomeIcon, Search, ChevronRight, Play, Pause, Volume2, VolumeX, Plus, Trash2, LogIn, User, Settings as SettingsIcon } from 'lucide-react';
+import LoadingSpinner from '@/components/LoadingSpinner';
 import Link from 'next/link';
+// Note: DebugInfo component removed - no longer needed
+import { useAuth } from '@/contexts/AuthContext';
+import UserProfile from '@/components/UserProfile';
+// Note: session-storage removed - files now managed by Supabase Storage
+import { useRouter } from 'next/navigation';
+import { useFileProcessing } from '@/hooks/useFileProcessing';
+import { apiService } from '@/lib/api';
+import SettingsPage from '@/components/SettingsPage';
 
 // API configuration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -26,10 +35,34 @@ interface ProcessingResult {
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [fileType, setFileType] = useState<'video' | 'image'>('video');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [result, setResult] = useState<ProcessingResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [processedFiles, setProcessedFiles] = useState<FileInfo[]>([]);
+  const [currentPage, setCurrentPage] = useState<'home' | 'settings'>('home');
+  
+  // Use the new file processing hook
+  const {
+    isProcessing,
+    progress,
+    result,
+    error,
+    processedFiles,
+    processFile: processFileWithHook,
+    downloadFile: downloadFileWithHook,
+    loadProcessedFiles,
+    clearError,
+    clearResult,
+    setError,
+  } = useFileProcessing();
+  
+  // Local state for additional functionality
+  const [localProcessedFiles, setLocalProcessedFiles] = useState<FileInfo[]>([]);
+  
+  // Combine processed files from hook and local state
+  const allProcessedFiles = useMemo(() => {
+    const combined = [...localProcessedFiles, ...processedFiles];
+    // Remove duplicates based on filename
+    return combined.filter((file, index, self) => 
+      index === self.findIndex(f => f.filename === file.filename)
+    );
+  }, [localProcessedFiles, processedFiles]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -43,6 +76,20 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const originalVideoRef = useRef<HTMLVideoElement>(null);
   const censoredVideoRef = useRef<HTMLVideoElement>(null);
+
+  const { user, signOut, loading } = useAuth();
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    await signOut();
+  };
+
+  // Redirect to login page if not authenticated
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push('/login');
+    }
+  }, [loading, user, router]);
 
   // Memoize the video URL to prevent recreation on every render
   const videoUrl = useMemo(() => {
@@ -107,9 +154,16 @@ export default function Home() {
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
+      // Check file size limit (50MB)
+      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
+      if (selectedFile.size > MAX_FILE_SIZE) {
+        setError(`File too large. Maximum size allowed is ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+        return;
+      }
+
       setFile(selectedFile);
-      setError(null);
-      setResult(null);
+      clearError();
+      clearResult();
       
       // Determine file type
       const isVideo = selectedFile.type.startsWith('video/');
@@ -121,7 +175,7 @@ export default function Home() {
       } else if (isImage) {
         setFileType('image');
       } else {
-        setError('Please select a valid video or image file');
+        // Error handling is done by the hook
         setFile(null);
       }
     }
@@ -143,9 +197,16 @@ export default function Home() {
     
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
+      // Check file size limit (50MB)
+      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
+      if (droppedFile.size > MAX_FILE_SIZE) {
+        setError(`File too large. Maximum size allowed is ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+        return;
+      }
+
       setFile(droppedFile);
-      setError(null);
-      setResult(null);
+      clearError();
+      clearResult();
       
       const isVideo = droppedFile.type.startsWith('video/');
       const isImage = droppedFile.type.startsWith('image/');
@@ -155,7 +216,7 @@ export default function Home() {
       } else if (isImage) {
         setFileType('image');
       } else {
-        setError('Please select a valid video or image file');
+        // Error handling is done by the hook
         setFile(null);
       }
     }
@@ -199,50 +260,15 @@ export default function Home() {
   }, []);
 
   const fetchProcessedFiles = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/files`);
-      if (response.ok) {
-        const data: { files: FileInfo[] } = await response.json();
-        
-        // Merge with existing localStorage data to maintain persistence
-        const existingFiles = localStorage.getItem('recentFiles');
-        if (existingFiles) {
-          try {
-            const parsedExisting = JSON.parse(existingFiles);
-            const mergedFiles = [...parsedExisting, ...data.files];
-            // Remove duplicates based on filename
-            const uniqueFiles = mergedFiles.filter((file, index, self) => 
-              index === self.findIndex(f => f.filename === file.filename)
-            );
-            setProcessedFiles(uniqueFiles);
-          } catch {
-            setProcessedFiles(data.files);
-          }
-        } else {
-          setProcessedFiles(data.files);
-        }
-      }
-    } catch (fetchError) {
-      console.error('Failed to fetch processed files:', fetchError);
-      // Fallback to localStorage if backend is unavailable
-      const savedFiles = localStorage.getItem('recentFiles');
-      if (savedFiles) {
-        try {
-          const parsedFiles = JSON.parse(savedFiles);
-          setProcessedFiles(parsedFiles);
-        } catch {
-          console.error('Error loading saved files');
-        }
-      }
-    }
-  }, []);
+    await loadProcessedFiles();
+  }, [loadProcessedFiles]);
 
   const resetVideoStates = useCallback(() => {
     setShowControls(false);
   }, []);
 
   const addToRecentFiles = useCallback((newFile: FileInfo) => {
-    setProcessedFiles(prev => {
+    setLocalProcessedFiles((prev: FileInfo[]) => {
       const updated = [newFile, ...prev.filter(f => f.filename !== newFile.filename)];
       return updated.slice(0, 20); // Keep only last 20 files
     });
@@ -250,67 +276,30 @@ export default function Home() {
 
   const processFile = useCallback(async () => {
     if (!file) return;
-
-    setIsProcessing(true);
-    setError(null);
-    setResult(null);
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      // Use single endpoint for both video and image processing
-      const response = await fetch(`${API_BASE_URL}/process`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to process file');
-      }
-
-      const resultData: ProcessingResult = await response.json();
-      setResult(resultData);
-      
-      // Add to recent files
+    
+    // Clear any previous errors
+    clearError();
+    clearResult();
+    
+    // Process the file using the hook
+    await processFileWithHook(file);
+    
+    // Add to recent files for local storage persistence
+    if (result) {
       const newFile: FileInfo = {
-        filename: resultData.output_file,
-        size: file.size, // Use the original file size
-        download_url: resultData.download_url,
-        originalFileUrl: URL.createObjectURL(file), // Store the blob URL of the original uploaded file
-        censoredFile: resultData.output_file // Store the censored file name
+        filename: result.output_file,
+        size: file.size,
+        download_url: result.download_url,
+        originalFileUrl: URL.createObjectURL(file),
+        censoredFile: result.output_file
       };
       addToRecentFiles(newFile);
-      
-      // Refresh the list of processed files from backend
-      fetchProcessedFiles();
-      
-    } catch {
-      setError('Failed to process file');
-    } finally {
-      setIsProcessing(false);
     }
-  }, [file, fetchProcessedFiles, addToRecentFiles]);
+  }, [file, processFileWithHook, result, clearError, clearResult]);
 
   const downloadFile = useCallback(async (filename: string) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/download/${filename}`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      }
-    } catch {
-      setError('Failed to download file');
-    }
-  }, []);
+    await downloadFileWithHook(filename);
+  }, [downloadFileWithHook]);
 
   const togglePlayPause = useCallback(() => {
     if (fileType === 'video' && videoRef.current) {
@@ -402,28 +391,23 @@ export default function Home() {
     }
   }, [fileType]);
 
-  // Fetch processed files on component mount and load from localStorage
+  // Clear errors when user becomes authenticated
   useEffect(() => {
-    fetchProcessedFiles();
-    
-    // Load recent files from localStorage
-    const savedFiles = localStorage.getItem('recentFiles');
-    if (savedFiles) {
-      try {
-        const parsedFiles = JSON.parse(savedFiles);
-        setProcessedFiles(parsedFiles);
-      } catch (error) {
-        console.error('Error loading saved files:', error);
-      }
+    if (user && !loading && error) {
+      clearError();
     }
-  }, [fetchProcessedFiles]);
+  }, [user, loading, error, clearError]);
 
-  // Save files to localStorage whenever they change
+  // Fetch processed files on component mount (only if user is authenticated)
   useEffect(() => {
-    if (processedFiles.length > 0) {
-      localStorage.setItem('recentFiles', JSON.stringify(processedFiles));
+    if (user && !loading) {
+      fetchProcessedFiles();
     }
-  }, [processedFiles]);
+  }, [fetchProcessedFiles, user, loading]);
+
+  // Note: File state persistence removed - files are now managed by Supabase Storage
+
+  // Note: App state persistence removed - files now managed by Supabase Storage
 
   // Memoized video component to prevent unnecessary re-renders
   const VideoPlayer = useMemo(() => (
@@ -499,6 +483,18 @@ export default function Home() {
     );
   }, [file, fileType, showControls, currentTime, isPlaying, isMuted, handleProgressBarClick, formatTime, togglePlayPause, toggleMute, handleControlsMouseEnter, handleControlsMouseLeave]);
 
+  // Show loading screen while checking authentication
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[hsl(var(--background))] flex items-center justify-center">
+        <div className="text-center">
+          <LoadingSpinner size="lg" className="mx-auto mb-4" />
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] text-white flex overflow-x-hidden">
       {/* Left Sidebar */}
@@ -530,16 +526,41 @@ export default function Home() {
 
         {/* Navigation Links */}
         <nav className="space-y-2">
-          <Link href="/" className="flex items-center space-x-3 p-3 rounded-lg bg-[hsl(var(--tiktok-red))]/10 text-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/20 transition-all duration-200 hover-lift" onClick={() => setFile(null)}>
+          <button 
+            onClick={() => setCurrentPage('home')}
+            className={`flex items-center space-x-3 p-3 rounded-lg transition-all duration-200 hover-lift w-full text-left ${
+              currentPage === 'home' 
+                ? 'bg-[hsl(var(--tiktok-red))]/10 text-[hsl(var(--tiktok-red))]' 
+                : 'bg-[hsl(var(--interaction-bg))] hover:bg-[hsl(var(--hover-bg))] text-gray-300'
+            }`}
+          >
             <HomeIcon className="h-5 w-5" />
             <span>Home</span>
-          </Link>
+          </button>
+          
           <Link href="/explore" className="flex items-center space-x-3 p-3 rounded-lg text-gray-300 hover:bg-[hsl(var(--hover-bg))] hover:text-white transition-all duration-200 hover-lift">
             <Search className="h-5 w-5" />
             <span>Explore</span>
             <ChevronRight className="h-4 w-4 ml-auto" />
           </Link>
+          
+          <button 
+            onClick={() => setCurrentPage('settings')}
+            className={`flex items-center space-x-3 p-3 rounded-lg transition-all duration-200 hover-lift w-full text-left ${
+              currentPage === 'settings' 
+                ? 'bg-[hsl(var(--tiktok-red))]/10 text-[hsl(var(--tiktok-red))]' 
+                : 'bg-[hsl(var(--interaction-bg))] hover:bg-[hsl(var(--hover-bg))] text-gray-300'
+            }`}
+          >
+            <SettingsIcon className="h-5 w-5" />
+            <span>Settings</span>
+          </button>
         </nav>
+
+        {/* User Profile */}
+        <div className="absolute bottom-20 left-6 right-6">
+          <UserProfile onSignOut={handleSignOut} />
+        </div>
 
         {/* Footer */}
         <div className="absolute bottom-6 left-6 right-6">
@@ -551,7 +572,8 @@ export default function Home() {
 
       {/* Main Content Area */}
       <div className="flex-1 ml-64 overflow-y-auto">
-        <div className="p-6 pt-8 max-w-full">
+        {currentPage === 'home' ? (
+          <div className="p-6 pt-8 max-w-full">
           {/* Top Bar */}
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -564,14 +586,6 @@ export default function Home() {
             </div>
             <div className="flex space-x-4">
               <a 
-                href="https://devpost.com/software/piipal" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="px-4 py-2 text-gray-300 hover:text-white transition-all duration-200 hover:bg-[hsl(var(--hover-bg))] rounded-lg"
-              >
-                DevPost
-              </a>
-              <a 
                 href="https://github.com/spencercdz/techjam_catgpt_2025" 
                 target="_blank" 
                 rel="noopener noreferrer"
@@ -583,7 +597,7 @@ export default function Home() {
                 href="https://devpost.com/software/piipal" 
                 className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white px-6 py-2 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow"
               >
-                Demo
+                DevPost
               </a>
             </div>
           </div>
@@ -608,13 +622,14 @@ export default function Home() {
                 >
                   <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-lg text-white mb-2">Drop your file here</p>
-                  <p className="text-gray-400 mb-4">or</p>
+                  <p className="text-gray-400 mb-2">or</p>
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white py-2 px-6 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow"
+                    className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white py-2 px-6 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow mb-4"
                   >
                     Browse Files
                   </button>
+                  <p className="text-xs text-gray-500">Maximum file size: 50MB</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -682,7 +697,7 @@ export default function Home() {
                 {!result && (
                   <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
                     <h3 className="text-lg font-semibold mb-3 text-white text-center">
-                      <span className="gradient-text">PiiPal is Ready!</span>
+                      <span className="gradient-text">PIIPal is Ready!</span>
                     </h3>
                     
                     <p className="text-gray-400 text-center mb-4">
@@ -696,9 +711,17 @@ export default function Home() {
                         className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 disabled:bg-gray-600 text-white py-3 px-8 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow disabled:cursor-not-allowed"
               >
                 {isProcessing ? (
-                          <div className="flex items-center space-x-2">
+                          <div className="flex flex-col items-center space-y-2">
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    <span>Processing...</span>
+                            <span>Processing...</span>
+                            {progress > 0 && (
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div 
+                                  className="bg-white h-2 rounded-full transition-all duration-300" 
+                                  style={{ width: `${progress}%` }}
+                                ></div>
+                              </div>
+                            )}
                           </div>
                 ) : (
                           'Censor'
@@ -836,10 +859,15 @@ export default function Home() {
                             </div>
                           ) : (
                             <img
-                              src={`${API_BASE_URL}/download/${result.output_file}`}
+                              src={result.storage_url || `${API_BASE_URL}/download/${result.output_file}`}
                               alt="Censored file preview"
                               className="w-full h-auto max-h-[40vh] max-w-full object-contain"
                               loading="lazy"
+                              onError={(e) => {
+                                // Fallback to alternative URL pattern if the first one fails
+                                const altUrl = `${API_BASE_URL}/download/${result.output_file.replace('censored_', '').replace('.jpeg', '_output.jpeg')}`;
+                                e.currentTarget.src = altUrl;
+                              }}
                             />
                           )}
                         </div>
@@ -868,8 +896,8 @@ export default function Home() {
                       <button
                         onClick={() => {
                           setFile(null);
-                          setResult(null);
-                          setError(null);
+                          clearResult();
+                          clearError();
                           resetVideoStates(); // Reset video states when starting a new file
                         }}
                         className="bg-[hsl(var(--tiktok-blue))] hover:bg-[hsl(var(--tiktok-blue))]/90 text-white py-3 px-6 rounded-lg font-medium transition-all duration-200 flex items-center justify-center space-x-2 hover-lift hover-glow"
@@ -960,18 +988,7 @@ export default function Home() {
                                     URL.revokeObjectURL(fileInfo.originalFileUrl);
                                   }
                                   // Remove file from processed files
-                                  setProcessedFiles(prev => prev.filter(f => f.filename !== fileInfo.filename));
-                                  // Remove from localStorage
-                                  const savedFiles = localStorage.getItem('recentFiles');
-                                  if (savedFiles) {
-                                    try {
-                                      const parsedFiles = JSON.parse(savedFiles);
-                                      const updatedFiles = parsedFiles.filter((f: FileInfo) => f.filename !== fileInfo.filename);
-                                      localStorage.setItem('recentFiles', JSON.stringify(updatedFiles));
-                                    } catch (error) {
-                                      console.error('Error updating localStorage:', error);
-                                    }
-                                  }
+                                  setLocalProcessedFiles((prev: FileInfo[]) => prev.filter(f => f.filename !== fileInfo.filename));
                                 }}
                                 className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg text-xs font-medium transition-all duration-200 hover-lift hover-glow flex-shrink-0"
                                 title="Delete from history"
@@ -1065,6 +1082,9 @@ export default function Home() {
             </div>
           )}
         </div>
+        ) : (
+          <SettingsPage />
+        )}
       </div>
     </div>
   );
