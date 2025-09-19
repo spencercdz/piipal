@@ -14,8 +14,8 @@ import time
 # Add the backend directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import only from yolo_e.py
-from scripts.yolo_e import run_image_pixelate, run_video_censor, model
+# Import only from yolo_e.py - model will be loaded lazily
+from scripts.yolo_e import run_image_pixelate, run_video_censor
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -54,19 +54,31 @@ else:
 # Add startup event handler for Supabase initialization
 @app.on_event("startup")
 async def startup_event():
-    """Initialize Supabase on startup"""
+    """Initialize Supabase on startup - non-blocking"""
     global SUPABASE_AVAILABLE
     if SUPABASE_AVAILABLE:
         try:
-            # Test Supabase connection
+            # Test Supabase connection with timeout
             supabase_config.test_connection()
-            # Initialize storage bucket
-            await storage_service.create_bucket()
-            logger.info("Supabase integration initialized successfully")
+            logger.info("Supabase connection test successful")
+            
+            # Initialize storage bucket in background (non-blocking)
+            import asyncio
+            asyncio.create_task(initialize_storage_bucket())
+            
         except Exception as e:
             logger.warning(f"Supabase initialization failed: {str(e)}")
             logger.warning("Continuing without Supabase integration")
             SUPABASE_AVAILABLE = False
+
+async def initialize_storage_bucket():
+    """Initialize storage bucket in background"""
+    try:
+        await storage_service.create_bucket()
+        logger.info("Supabase storage bucket initialized successfully")
+    except Exception as e:
+        logger.warning(f"Storage bucket initialization failed: {str(e)}")
+        logger.warning("Storage features may not work properly")
 
 # Add CORS middleware
 app.add_middleware(
@@ -103,7 +115,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """Health check endpoint for Render deployment"""
+    return {
+        "status": "healthy",
+        "supabase_available": SUPABASE_AVAILABLE,
+        "timestamp": time.time()
+    }
 
 
 @app.post("/process")
@@ -162,6 +179,7 @@ async def process_file_endpoint(
             output_path = UPLOAD_DIR / output_filename
             
             # Process video using yolo_e.py
+            from scripts.yolo_e import model
             run_video_censor(
                 model=model,
                 in_video_path=str(input_path),
@@ -178,6 +196,7 @@ async def process_file_endpoint(
             logger.info(f"Processing as image: {file.filename}")
             
             # Process image using yolo_e.py
+            from scripts.yolo_e import model
             processed_img, detections = run_image_pixelate(
                 model=model,
                 img_path=str(input_path),
@@ -420,11 +439,12 @@ async def delete_user_account(current_user: Dict[str, Any] = Depends(get_current
         logger.error(f"Error deleting user account: {str(e)}")
         raise HTTPException(status_code=500, detail="Error deleting account")
 
+# For local development only
 if __name__ == "__main__":
     import uvicorn
     import os
     
-    # Get port from environment variable (for Render) or default to 8000
+    # Get port from environment variable or default to 8000
     port = int(os.environ.get("PORT", 8000))
     
     uvicorn.run(

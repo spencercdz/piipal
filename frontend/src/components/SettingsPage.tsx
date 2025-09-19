@@ -174,7 +174,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 p-8 overflow-y-auto">
+    <div className="flex-1 p-6 pt-8 overflow-y-auto">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center space-x-3 mb-2">
