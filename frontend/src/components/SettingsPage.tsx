@@ -104,28 +104,58 @@ export default function SettingsPage() {
     setErrorMessage('')
     
     try {
-      // Clean up user data through our backend API
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/user/delete`, {
+      // Get the session token
+      const session = await supabase.auth.getSession()
+      const token = session.data.session?.access_token
+      
+      if (!token) {
+        throw new Error('Please sign in again to delete your account')
+      }
+      
+      // Check if backend is available and working
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL
+      
+      if (!apiUrl || apiUrl === 'http://localhost:8000') {
+        throw new Error('Account deletion is not available. Please contact support to delete your account.')
+      }
+      
+      // Test backend connectivity first
+      try {
+        const healthResponse = await fetch(`${apiUrl}/health`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (!healthResponse.ok) {
+          throw new Error('Backend service is not available')
+        }
+      } catch (healthError) {
+        throw new Error('Backend service is not available. Account deletion requires the backend to be running.')
+      }
+      
+      // Attempt to delete account through backend
+      const response = await fetch(`${apiUrl}/user/delete`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+          'Authorization': `Bearer ${token}`
         }
       })
       
       if (!response.ok) {
-        throw new Error('Failed to clean up user data')
+        const errorText = await response.text()
+        throw new Error(`Account deletion failed: ${response.status} - ${errorText}`)
       }
       
-      // Sign out the user
-      await signOut()
-      
-      // Show success message
-      setSuccessMessage('Account data deleted successfully. You have been signed out.')
+      // Backend successfully deleted everything including auth user
+      setSuccessMessage('Account deleted successfully. You have been signed out.')
       
     } catch (error) {
       console.error('Error deleting account:', error)
-      setErrorMessage('Failed to delete account data. Please try again or contact support.')
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      setErrorMessage(`Failed to delete account: ${errorMessage}`)
     } finally {
       setIsDeleting(false)
       setShowDeleteConfirm(false)

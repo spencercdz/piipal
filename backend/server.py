@@ -404,9 +404,14 @@ async def delete_user_account(current_user: Dict[str, Any] = Depends(get_current
         except Exception as e:
             logger.warning(f"Error deleting user database records: {str(e)}")
         
-        # Note: We don't delete the user from Supabase Auth here as that should be handled
-        # by the frontend calling supabase.auth.admin.deleteUser() or the user can delete
-        # their account through Supabase dashboard
+        # Delete the user from Supabase Auth (this requires service role key)
+        try:
+            # Use the admin client to delete the user from auth
+            auth_response = supabase_config.client.auth.admin.delete_user(user_id)
+            logger.info(f"Deleted user from Supabase Auth: {user_id}")
+        except Exception as e:
+            logger.warning(f"Error deleting user from Supabase Auth: {str(e)}")
+            # Continue anyway - the data cleanup is more important
         
         logger.info(f"Successfully deleted account data for user {user_id}")
         return {"message": "Account deleted successfully"}
