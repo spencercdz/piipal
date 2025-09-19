@@ -8,7 +8,20 @@ import numpy as np
 from moviepy.editor import VideoFileClip
 from .tracker import BoxTracker
 
-model = YOLOE('yoloe-11m-seg.pt')
+# Lazy model loading to avoid blocking startup
+_model = None
+
+def get_model():
+    """Get the YOLO model, loading it lazily if needed"""
+    global _model
+    if _model is None:
+        print("Loading YOLO model...")
+        _model = YOLOE('yoloe-11m-seg.pt')
+        print("YOLO model loaded successfully!")
+    return _model
+
+# Don't load model immediately - only when needed
+# model = get_model()  # Removed to prevent startup blocking
 
 names = ["traffic sign", 
          "parking sign",

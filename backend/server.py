@@ -14,9 +14,6 @@ import time
 # Add the backend directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import only from yolo_e.py - model will be loaded lazily
-from scripts.yolo_e import run_image_pixelate, run_video_censor
-
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,6 +52,10 @@ else:
 @app.on_event("startup")
 async def startup_event():
     """Initialize Supabase on startup - non-blocking"""
+    logger.info("🚀 FastAPI app starting up...")
+    logger.info(f"📡 Port: {os.environ.get('PORT', '8000')}")
+    logger.info("✅ App is ready to accept requests!")
+    
     global SUPABASE_AVAILABLE
     if SUPABASE_AVAILABLE:
         try:
@@ -111,7 +112,8 @@ def is_image_file(filename: str) -> bool:
 
 @app.get("/")
 async def root():
-    return {"message": "PII Censor API is running"}
+    """Root endpoint - ensures port binding works immediately"""
+    return {"message": "PII Censor API is running", "status": "ready"}
 
 @app.get("/health")
 async def health_check():
@@ -121,6 +123,11 @@ async def health_check():
         "supabase_available": SUPABASE_AVAILABLE,
         "timestamp": time.time()
     }
+
+@app.get("/ready")
+async def ready_check():
+    """Simple readiness check for Render port detection"""
+    return {"status": "ready", "port": os.environ.get("PORT", "unknown")}
 
 
 @app.post("/process")
@@ -178,8 +185,9 @@ async def process_file_endpoint(
             output_filename = f"censored_{file_id}_{file.filename}"
             output_path = UPLOAD_DIR / output_filename
             
-            # Process video using yolo_e.py
-            from scripts.yolo_e import model
+            # Process video using yolo_e.py - import only when needed
+            from scripts.yolo_e import run_video_censor, get_model
+            model = get_model()  # Load model lazily
             run_video_censor(
                 model=model,
                 in_video_path=str(input_path),
@@ -195,8 +203,9 @@ async def process_file_endpoint(
         elif is_image_file(file.filename):
             logger.info(f"Processing as image: {file.filename}")
             
-            # Process image using yolo_e.py
-            from scripts.yolo_e import model
+            # Process image using yolo_e.py - import only when needed
+            from scripts.yolo_e import run_image_pixelate, get_model
+            model = get_model()  # Load model lazily
             processed_img, detections = run_image_pixelate(
                 model=model,
                 img_path=str(input_path),
