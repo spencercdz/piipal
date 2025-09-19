@@ -673,41 +673,51 @@ export default function Home() {
 
                 {/* Processing Options - Show when not yet processed */}
                 {!result && (
-                  <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
-                    <h3 className="text-lg font-semibold mb-3 text-white text-center">
-                      <span className="gradient-text">PIIPal is Ready!</span>
-                    </h3>
-                    
-                    <p className="text-gray-400 text-center mb-4">
-                      Files are automatically processed using YOLOE detection and pixelation censoring.
-                    </p>
-                    
-                    <div className="text-center">
-              <button
-                onClick={processFile}
-                disabled={isProcessing}
-                        className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 disabled:bg-gray-600 text-white py-3 px-8 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow disabled:cursor-not-allowed"
-              >
-                {isProcessing ? (
-                          <div className="flex flex-col items-center space-y-2">
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                            <span>Processing...</span>
-                            {progress > 0 && (
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div 
-                                  className="bg-white h-2 rounded-full transition-all duration-300" 
-                                  style={{ width: `${progress}%` }}
-                                ></div>
-                              </div>
-                            )}
+                  <>
+                    {/* Show only loading circle when processing */}
+                    {isProcessing ? (
+                      <div className="flex flex-col items-center justify-center py-12">
+                        <LoadingSpinner size="lg" className="mb-4" />
+                        <p className="text-gray-400 text-center">
+                          Processing your file...
+                        </p>
+                        {progress > 0 && (
+                          <div className="w-64 mt-4">
+                            <div className="w-full bg-gray-700 rounded-full h-2">
+                              <div 
+                                className="bg-[hsl(var(--tiktok-red))] h-2 rounded-full transition-all duration-300" 
+                                style={{ width: `${progress}%` }}
+                              ></div>
+                            </div>
+                            <p className="text-sm text-gray-400 text-center mt-2">
+                              {Math.round(progress)}% complete
+                            </p>
                           </div>
-                ) : (
-                          'Censor'
+                        )}
+                      </div>
+                    ) : (
+                      /* Show the full card when not processing */
+                      <div className="bg-[hsl(var(--card-background))] rounded-xl border border-[hsl(var(--border-color))] p-4 hover-glow transition-all duration-200">
+                        <h3 className="text-lg font-semibold mb-3 text-white text-center">
+                          <span className="gradient-text">PIIPal is Ready!</span>
+                        </h3>
+                        
+                        <p className="text-gray-400 text-center mb-4">
+                          Files are automatically processed using YOLOE detection and pixelation censoring.
+                        </p>
+                        
+                        <div className="text-center">
+                          <button
+                            onClick={processFile}
+                            className="bg-[hsl(var(--tiktok-red))] hover:bg-[hsl(var(--tiktok-red))]/90 text-white py-3 px-8 rounded-lg font-medium transition-all duration-200 hover-lift hover-glow"
+                          >
+                            Censor
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
-              </button>
-                    </div>
-            </div>
-          )}
 
                 {/* Processing Complete - Show when processing is done */}
           {result && (

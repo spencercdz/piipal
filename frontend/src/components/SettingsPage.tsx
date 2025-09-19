@@ -8,8 +8,8 @@ import LoadingSpinner from './LoadingSpinner'
 import { supabase } from '@/lib/supabase'
 
 export default function SettingsPage() {
-  const { user, signOut } = useAuth()
-  const { profile, preferences, loading, updateProfile, updatePreferences } = useUserData()
+  const { user, signOut, loading } = useAuth()
+  const { profile, preferences, updateProfile, updatePreferences } = useUserData()
   
   // Form states
   const [displayName, setDisplayName] = useState('')
@@ -164,10 +164,10 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="min-h-screen bg-[hsl(var(--background))] flex items-center justify-center">
         <div className="text-center">
           <LoadingSpinner size="lg" className="mx-auto mb-4" />
-          <p className="text-gray-400">Loading settings...</p>
+          <p className="text-gray-400">Loading...</p>
         </div>
       </div>
     )

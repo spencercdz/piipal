@@ -138,6 +138,7 @@ sample_images/
 sample_videos/
 output_images/
 output_videos/
+movieclip/
 
 # Temporary files
 *.tmp
@@ -171,4 +172,4 @@ logs/
 config/local.json
 
 # Large model files
-backend/mobileclip_blt.tsmobileclip_blt.ts
+backend/mobileclip_blt.ts
