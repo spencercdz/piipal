@@ -16,7 +16,18 @@ def get_model():
     global _model
     if _model is None:
         print("Loading YOLO model...")
-        _model = YOLOE('yoloe-11m-seg.pt')
+        
+        # Set environment variables to reduce memory usage
+        import os
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''  # Force CPU usage to save memory
+        os.environ['OMP_NUM_THREADS'] = '1'  # Limit OpenMP threads
+        
+        # Load model with memory optimization
+        _model = YOLOE('yoloe-11s-seg.pt')
+        
+        # Optimize model for inference
+        _model.model.half()  # Use half precision to reduce memory
+        
         setup_model_classes()  # Setup classes after model is loaded
         print("YOLO model loaded successfully!")
     return _model

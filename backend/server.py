@@ -91,8 +91,29 @@ async def load_model_after_startup():
     """Load YOLO model after startup to avoid blocking port binding"""
     try:
         logger.info("🤖 Loading YOLO model in background...")
+        
+        # Import memory optimization modules
+        import gc
+        import psutil
+        
+        # Log initial memory usage
+        process = psutil.Process()
+        initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+        logger.info(f"📊 Initial memory usage: {initial_memory:.1f} MB")
+        
         from scripts.yolo_e import get_model
         model = get_model()
+        
+        # Log memory usage after model loading
+        post_model_memory = process.memory_info().rss / 1024 / 1024  # MB
+        logger.info(f"📊 Memory after model load: {post_model_memory:.1f} MB (+{post_model_memory - initial_memory:.1f} MB)")
+        
+        # Force garbage collection
+        gc.collect()
+        
+        final_memory = process.memory_info().rss / 1024 / 1024  # MB
+        logger.info(f"📊 Memory after cleanup: {final_memory:.1f} MB")
+        
         logger.info("✅ YOLO model loaded successfully!")
     except Exception as e:
         logger.error(f"❌ Failed to load YOLO model: {str(e)}")
@@ -226,13 +247,27 @@ async def status_check():
         except Exception as e:
             logger.warning(f"Error checking model status: {e}")
         
+        # Get memory usage
+        memory_info = {}
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_info = {
+                "memory_mb": round(process.memory_info().rss / 1024 / 1024, 1),
+                "memory_percent": round(process.memory_percent(), 1),
+                "cpu_percent": round(process.cpu_percent(), 1)
+            }
+        except ImportError:
+            memory_info = {"error": "psutil not available"}
+        
         return {
             "status": "healthy",
             "timestamp": time.time(),
             "port": os.environ.get("PORT", "unknown"),
             "supabase_available": SUPABASE_AVAILABLE,
             "model_loaded": model_loaded,
-            "uptime": "running"
+            "uptime": "running",
+            "system": memory_info
         }
     except Exception as e:
         return {
@@ -278,8 +313,8 @@ async def process_file_endpoint(
     logger.info(f"File size: {file.size} bytes ({file.size / (1024 * 1024):.2f} MB)")
     logger.info(f"File content type: {file.content_type}")
     
-    # Check file size limit (50MB)
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB in bytes
+    # Check file size limit (reduced to 25MB for memory constraints)
+    MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB in bytes (reduced from 50MB)
     if file.size and file.size > MAX_FILE_SIZE:
         logger.warning(f"File too large: {file.size} bytes > {MAX_FILE_SIZE} bytes")
         raise HTTPException(
@@ -318,6 +353,24 @@ async def process_file_endpoint(
         
         # Start processing timer
         start_time = time.time()
+        
+        # Log memory usage before processing
+        try:
+            import psutil
+            process = psutil.Process()
+            pre_processing_memory = process.memory_info().rss / 1024 / 1024  # MB
+            logger.info(f"📊 Memory before processing: {pre_processing_memory:.1f} MB")
+            
+            # Check if we're approaching memory limit (400MB out of 512MB)
+            if pre_processing_memory > 400:
+                logger.warning(f"⚠️ High memory usage detected: {pre_processing_memory:.1f} MB")
+                # Force garbage collection
+                import gc
+                gc.collect()
+                post_gc_memory = process.memory_info().rss / 1024 / 1024  # MB
+                logger.info(f"📊 Memory after cleanup: {post_gc_memory:.1f} MB")
+        except ImportError:
+            pass
         
         # Process based on file type
         if is_video_file(file.filename):
@@ -392,6 +445,17 @@ async def process_file_endpoint(
         
         # Calculate processing time
         processing_time = time.time() - start_time
+        
+        # Log memory usage after processing and cleanup
+        try:
+            import gc
+            import psutil
+            gc.collect()  # Force garbage collection
+            process = psutil.Process()
+            post_processing_memory = process.memory_info().rss / 1024 / 1024  # MB
+            logger.info(f"📊 Memory after processing: {post_processing_memory:.1f} MB")
+        except ImportError:
+            pass
         
         # Upload to Supabase Storage (required for authenticated users)
         storage_info = None

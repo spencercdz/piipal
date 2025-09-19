@@ -27,3 +27,4 @@ python-dotenv
 # Additional utilities
 pathlib2
 typing-extensions
+psutil

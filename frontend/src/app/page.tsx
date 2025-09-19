@@ -142,8 +142,8 @@ export default function Home() {
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
     if (selectedFile) {
-      // Check file size limit (50MB)
-      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
+      // Check file size limit
+      const MAX_FILE_SIZE = 25 * 1024 * 1024;
       if (selectedFile.size > MAX_FILE_SIZE) {
         setError(`File too large. Maximum size allowed is ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
         return;
@@ -200,8 +200,8 @@ export default function Home() {
     
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
-      // Check file size limit (50MB)
-      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
+      // Check file size limit (25MB - reduced for memory constraints)
+      const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB in bytes
       if (droppedFile.size > MAX_FILE_SIZE) {
         setError(`File too large. Maximum size allowed is ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
         return;
