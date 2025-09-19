@@ -47,8 +47,7 @@ export default function Home() {
     setError,
   } = useFileProcessing();
   
-  // Local state for additional functionality
-  const [localProcessedFiles, setLocalProcessedFiles] = useState<FileInfo[]>([]);
+  // Note: localProcessedFiles removed - using processedFiles from hook directly
   
   // Note: allProcessedFiles removed - using processedFiles from hook directly
   const [isPlaying, setIsPlaying] = useState(false);

@@ -44,7 +44,7 @@ export default function AuthModal({ isOpen, onClose, mode, onModeChange }: AuthM
         
         const { data, error } = await signUp(email, password)
         if (error) {
-          setError(error.message)
+          setError(error instanceof Error ? error.message : 'Sign up failed')
         } else {
           setSuccess('Check your email for verification link!')
           // Reset form
@@ -55,7 +55,7 @@ export default function AuthModal({ isOpen, onClose, mode, onModeChange }: AuthM
       } else {
         const { data, error } = await signIn(email, password)
         if (error) {
-          setError(error.message)
+          setError(error instanceof Error ? error.message : 'Sign in failed')
         } else {
           setSuccess('Successfully signed in!')
           setTimeout(() => {
