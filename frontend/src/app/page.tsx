@@ -17,13 +17,13 @@ import SettingsPage from '@/components/SettingsPage';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Type definitions
-interface FileInfo {
-  filename: string;
-  size: number;
-  download_url: string;
-  originalFileUrl?: string; // Store the blob URL of the original uploaded file
-  censoredFile?: string; // Store the censored file name
-}
+// interface FileInfo {
+//   filename: string;
+//   size: number;
+//   download_url: string;
+//   originalFileUrl?: string; // Store the blob URL of the original uploaded file
+//   censoredFile?: string; // Store the censored file name
+// }
 
 // Note: ProcessingResult interface removed - using type from useFileProcessing hook
 

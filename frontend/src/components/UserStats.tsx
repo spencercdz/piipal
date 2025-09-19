@@ -22,7 +22,17 @@ export default function UserStats() {
       try {
         const response = await apiService.getUserStats()
         if (response.data) {
-          setStats(response.data)
+          const d: any = response.data
+          const isValid =
+            typeof d.total_files === 'number' &&
+            typeof d.completed_files === 'number' &&
+            typeof d.images_processed === 'number' &&
+            typeof d.videos_processed === 'number' &&
+            typeof d.this_month === 'number'
+
+          if (isValid) {
+            setStats(d as UserStats)
+          }
         }
       } catch (error) {
         console.error('Error loading user stats:', error)
