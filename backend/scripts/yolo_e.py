@@ -17,11 +17,9 @@ def get_model():
     if _model is None:
         print("Loading YOLO model...")
         _model = YOLOE('yoloe-11m-seg.pt')
+        setup_model_classes()  # Setup classes after model is loaded
         print("YOLO model loaded successfully!")
     return _model
-
-# Don't load model immediately - only when needed
-# model = get_model()  # Removed to prevent startup blocking
 
 names = ["traffic sign", 
          "parking sign",
@@ -46,7 +44,11 @@ names = ["traffic sign",
          "mirror",
          "ticket"
          ]
-model.set_classes(names, model.get_text_pe(names))
+# Model class setup will be done when model is loaded
+def setup_model_classes():
+    """Setup model classes when model is loaded"""
+    if _model is not None:
+        _model.set_classes(names, _model.get_text_pe(names))
 
 HD_CANDIDATE_FRAME_DIR = "backend/data/hd_candidate_frames"
 CANDIDATE_FRAME_DIR = "backend/data/candidate_frames"

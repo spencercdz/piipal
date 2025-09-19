@@ -61,7 +61,18 @@ export function useFileProcessing(): UseFileProcessingReturn {
       });
 
       if (response.error) {
-        setError(response.error);
+        // Handle specific error types from backend
+        if (response.status === 429) {
+          setError('Rate limit exceeded. Please wait a moment before trying again.');
+        } else if (response.status === 400 && response.error.includes('Invalid filename')) {
+          setError('Invalid filename. Please use a different file name.');
+        } else if (response.status === 400 && response.error.includes('file content')) {
+          setError('Invalid file content. The file may be corrupted or malicious.');
+        } else if (response.status === 413) {
+          setError('File too large. Please choose a smaller file.');
+        } else {
+          setError(response.error);
+        }
       } else if (response.data) {
         setResult(response.data);
         // Reload processed files list
@@ -77,7 +88,14 @@ export function useFileProcessing(): UseFileProcessingReturn {
 
   const downloadFile = useCallback(async (filename: string) => {
     try {
-      const blob = await apiService.downloadFile(filename);
+      // Find the file in processedFiles to get the download URL
+      const fileInfo = processedFiles.find(f => f.filename === filename);
+      if (!fileInfo || !fileInfo.download_url) {
+        setError('File not found or no download URL available');
+        return;
+      }
+
+      const blob = await apiService.downloadFile(fileInfo.download_url);
       if (blob) {
         // Create download link
         const url = window.URL.createObjectURL(blob);
@@ -94,7 +112,7 @@ export function useFileProcessing(): UseFileProcessingReturn {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed');
     }
-  }, []);
+  }, [processedFiles]);
 
   const clearError = useCallback(() => {
     setError(null);

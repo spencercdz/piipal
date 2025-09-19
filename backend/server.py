@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import os
@@ -10,6 +10,8 @@ import logging
 from typing import Optional, Dict, Any
 import sys
 import time
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 # Add the backend directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -71,6 +73,10 @@ async def startup_event():
             logger.warning(f"Supabase initialization failed: {str(e)}")
             logger.warning("Continuing without Supabase integration")
             SUPABASE_AVAILABLE = False
+    
+    # Load YOLO model after startup (non-blocking)
+    import asyncio
+    asyncio.create_task(load_model_after_startup())
 
 async def initialize_storage_bucket():
     """Initialize storage bucket in background"""
@@ -80,6 +86,17 @@ async def initialize_storage_bucket():
     except Exception as e:
         logger.warning(f"Storage bucket initialization failed: {str(e)}")
         logger.warning("Storage features may not work properly")
+
+async def load_model_after_startup():
+    """Load YOLO model after startup to avoid blocking port binding"""
+    try:
+        logger.info("🤖 Loading YOLO model in background...")
+        from scripts.yolo_e import get_model
+        model = get_model()
+        logger.info("✅ YOLO model loaded successfully!")
+    except Exception as e:
+        logger.error(f"❌ Failed to load YOLO model: {str(e)}")
+        logger.warning("File processing will fail until model is loaded")
 
 # Add CORS middleware
 app.add_middleware(
@@ -98,6 +115,11 @@ app.add_middleware(
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+# Rate limiting storage
+rate_limit_storage = defaultdict(list)
+RATE_LIMIT_REQUESTS = 10  # Max requests per minute per IP
+RATE_LIMIT_WINDOW = 60  # Time window in seconds
+
 # Supported file types
 SUPPORTED_VIDEO_TYPES = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".MP4", ".AVI", ".MOV", ".MKV", ".WEBM"}
 SUPPORTED_IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".JPG", ".JPEG", ".PNG", ".BMP", ".TIFF"}
@@ -109,6 +131,67 @@ def is_video_file(filename: str) -> bool:
 def is_image_file(filename: str) -> bool:
     """Check if file is an image based on extension"""
     return Path(filename).suffix.lower() in SUPPORTED_IMAGE_TYPES
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Check if client has exceeded rate limit"""
+    now = datetime.now()
+    # Clean old entries
+    rate_limit_storage[client_ip] = [
+        req_time for req_time in rate_limit_storage[client_ip]
+        if now - req_time < timedelta(seconds=RATE_LIMIT_WINDOW)
+    ]
+    
+    # Check if limit exceeded
+    if len(rate_limit_storage[client_ip]) >= RATE_LIMIT_REQUESTS:
+        return False
+    
+    # Add current request
+    rate_limit_storage[client_ip].append(now)
+    return True
+
+def _validate_file_content(file_path: Path, content_type: str) -> bool:
+    """Basic file content validation to prevent malicious uploads"""
+    try:
+        # Check file size (should already be validated, but double-check)
+        if file_path.stat().st_size == 0:
+            return False
+        
+        # Read first few bytes to check file signatures
+        with open(file_path, 'rb') as f:
+            header = f.read(16)
+        
+        # Check for common file signatures
+        if content_type.startswith('image/'):
+            # Check for image file signatures
+            if header.startswith(b'\xFF\xD8\xFF'):  # JPEG
+                return True
+            elif header.startswith(b'\x89PNG\r\n\x1a\n'):  # PNG
+                return True
+            elif header.startswith(b'BM'):  # BMP
+                return True
+            elif header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):  # GIF
+                return True
+            else:
+                logger.warning(f"Unknown image format for file: {file_path}")
+                return False
+                
+        elif content_type.startswith('video/'):
+            # Check for video file signatures
+            if header.startswith(b'\x00\x00\x00'):  # MP4/MOV
+                return True
+            elif header.startswith(b'RIFF'):  # AVI/WEBM
+                return True
+            else:
+                logger.warning(f"Unknown video format for file: {file_path}")
+                return False
+        
+        # If we can't validate, be conservative and reject
+        logger.warning(f"Could not validate file content for: {file_path}")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error validating file content: {e}")
+        return False
 
 @app.get("/")
 async def root():
@@ -129,9 +212,44 @@ async def ready_check():
     """Simple readiness check for Render port detection"""
     return {"status": "ready", "port": os.environ.get("PORT", "unknown")}
 
+@app.get("/status")
+async def status_check():
+    """Comprehensive status check for monitoring"""
+    try:
+        # Check if YOLO model is loaded
+        model_loaded = False
+        try:
+            from scripts.yolo_e import _model
+            model_loaded = _model is not None
+        except ImportError as e:
+            logger.warning(f"Could not import YOLO model for status check: {e}")
+        except Exception as e:
+            logger.warning(f"Error checking model status: {e}")
+        
+        return {
+            "status": "healthy",
+            "timestamp": time.time(),
+            "port": os.environ.get("PORT", "unknown"),
+            "supabase_available": SUPABASE_AVAILABLE,
+            "model_loaded": model_loaded,
+            "uptime": "running"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }
+
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint for health checks"""
+    return {"pong": True, "timestamp": time.time()}
+
 
 @app.post("/process")
 async def process_file_endpoint(
+    request: Request,
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
@@ -143,6 +261,15 @@ async def process_file_endpoint(
     - Images: Uses run_image_pixelate() with YOLOE detection
     - Videos: Uses run_video_censor() with YOLOE detection and frame-by-frame processing
     """
+    # Rate limiting check
+    client_ip = request.client.host
+    if not _check_rate_limit(client_ip):
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        raise HTTPException(
+            status_code=429, 
+            detail=f"Rate limit exceeded. Maximum {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW} seconds."
+        )
+    
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
     
@@ -160,17 +287,32 @@ async def process_file_endpoint(
             detail=f"File too large. Maximum size allowed is {MAX_FILE_SIZE // (1024 * 1024)}MB"
         )
     
-    # Generate unique filename
+    # Generate unique filename with security validation
     file_id = str(uuid.uuid4())
-    input_path = UPLOAD_DIR / f"{file_id}_{file.filename}"
+    
+    # Sanitize filename to prevent path traversal attacks
+    import re
+    safe_filename = re.sub(r'[^\w\-_\.]', '_', file.filename)
+    safe_filename = safe_filename[:100]  # Limit filename length
+    
+    # Ensure filename doesn't contain path traversal attempts
+    if '..' in safe_filename or '/' in safe_filename or '\\' in safe_filename:
+        raise HTTPException(status_code=400, detail="Invalid filename - path traversal not allowed")
+    
+    input_path = UPLOAD_DIR / f"{file_id}_{safe_filename}"
     # output_filename will be set later based on actual saved file
     output_filename = None
     output_path = None
     
     try:
-        # Save uploaded file
+        # Save uploaded file with content validation
         with open(input_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        
+        # Basic file content validation
+        if not _validate_file_content(input_path, file.content_type):
+            input_path.unlink()  # Remove the file
+            raise HTTPException(status_code=400, detail="Invalid file content - file may be corrupted or malicious")
         
         logger.info(f"Processing file: {file.filename}")
         
@@ -308,10 +450,20 @@ async def process_file_endpoint(
     except Exception as e:
         logger.error(f"Error processing file: {str(e)}")
         # Clean up files on error
-        if input_path.exists():
-            input_path.unlink()
-        if output_path.exists():
-            output_path.unlink()
+        try:
+            if input_path and input_path.exists():
+                input_path.unlink()
+                logger.info(f"Cleaned up input file: {input_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup input file: {cleanup_error}")
+        
+        try:
+            if output_path and output_path.exists():
+                output_path.unlink()
+                logger.info(f"Cleaned up output file: {output_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to cleanup output file: {cleanup_error}")
+        
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 # Note: Download endpoint removed - files are served directly from Supabase Storage

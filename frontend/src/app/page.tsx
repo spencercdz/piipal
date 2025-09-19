@@ -149,6 +149,21 @@ export default function Home() {
         return;
       }
 
+      // Check filename for security issues
+      if (selectedFile.name.includes('..') || selectedFile.name.includes('/') || selectedFile.name.includes('\\')) {
+        setError('Invalid filename. Please use a different file name.');
+        return;
+      }
+
+      // Check file type more strictly
+      const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'image/tiff'];
+      const allowedVideoTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/mkv', 'video/webm'];
+      
+      if (!allowedImageTypes.includes(selectedFile.type) && !allowedVideoTypes.includes(selectedFile.type)) {
+        setError('Unsupported file type. Please upload an image (JPEG, PNG, BMP, TIFF) or video (MP4, AVI, MOV, MKV, WEBM).');
+        return;
+      }
+
       setFile(selectedFile);
       clearError();
       clearResult();
@@ -189,6 +204,21 @@ export default function Home() {
       const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
       if (droppedFile.size > MAX_FILE_SIZE) {
         setError(`File too large. Maximum size allowed is ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
+        return;
+      }
+
+      // Check filename for security issues
+      if (droppedFile.name.includes('..') || droppedFile.name.includes('/') || droppedFile.name.includes('\\')) {
+        setError('Invalid filename. Please use a different file name.');
+        return;
+      }
+
+      // Check file type more strictly
+      const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'image/tiff'];
+      const allowedVideoTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/mkv', 'video/webm'];
+      
+      if (!allowedImageTypes.includes(droppedFile.type) && !allowedVideoTypes.includes(droppedFile.type)) {
+        setError('Unsupported file type. Please upload an image (JPEG, PNG, BMP, TIFF) or video (MP4, AVI, MOV, MKV, WEBM).');
         return;
       }
 
@@ -847,7 +877,7 @@ export default function Home() {
                             </div>
                           ) : (
                             <img
-                              src={result.storage_url || `${API_BASE_URL}/download/${result.output_file}`}
+                              src={result.storage_url || result.download_url}
                               alt="Censored file preview"
                               className="w-full h-auto max-h-[40vh] max-w-full object-contain"
                               loading="lazy"

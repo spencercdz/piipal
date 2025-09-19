@@ -152,6 +152,28 @@ class ApiService {
     return this.request('/health');
   }
 
+  // Status check (comprehensive)
+  async statusCheck(): Promise<ApiResponse<{
+    status: string;
+    timestamp: number;
+    port: string;
+    supabase_available: boolean;
+    model_loaded: boolean;
+    uptime: string;
+  }>> {
+    return this.request('/status');
+  }
+
+  // Ping endpoint
+  async ping(): Promise<ApiResponse<{ pong: boolean; timestamp: number }>> {
+    return this.request('/ping');
+  }
+
+  // Ready check
+  async readyCheck(): Promise<ApiResponse<{ status: string; port: string }>> {
+    return this.request('/ready');
+  }
+
   // Process file (upload and process)
   async processFile(
     file: File,
@@ -160,10 +182,10 @@ class ApiService {
     return this.uploadFile('/process', file, onProgress);
   }
 
-  // Download processed file
-  async downloadFile(filename: string): Promise<Blob | null> {
+  // Download processed file from Supabase Storage URL
+  async downloadFile(downloadUrl: string): Promise<Blob | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/download/${filename}`);
+      const response = await fetch(downloadUrl);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -179,9 +201,9 @@ class ApiService {
     return this.request('/files');
   }
 
-  // Get download URL for a file
-  getDownloadUrl(filename: string): string {
-    return `${this.baseUrl}/download/${filename}`;
+  // Get download URL for a file (now returns the Supabase Storage URL)
+  getDownloadUrl(storageUrl: string): string {
+    return storageUrl;
   }
 
   // User-specific endpoints
@@ -204,6 +226,9 @@ export const apiService = new ApiService();
 // Export individual functions for convenience
 export const {
   healthCheck,
+  statusCheck,
+  ping,
+  readyCheck,
   processFile,
   downloadFile,
   listFiles,
